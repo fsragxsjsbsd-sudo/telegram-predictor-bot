@@ -12,12 +12,11 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==============================================================================
-# ⚙️ ১. কনফিগারেশন সেটিংস (আপনার এডমিন আইডিগুলো)
+# ⚙️ ১. কনফিগারেশন সেটিংস
 # ==============================================================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8968313328:AAGZSQ0BzAfj_AaIJTq3wtWbrjsCAct8Sps")
 ADMIN_IDS = [6753121703, 7122259829]
 
-# এনভায়রনমেন্ট থেকে অতিরিক্ত এডমিন থাকলে যুক্ত করা
 env_adm = os.environ.get("ADMIN_IDS", "")
 if env_adm:
     for a in env_adm.split(","):
@@ -47,9 +46,13 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             username TEXT DEFAULT '',
             first_name TEXT DEFAULT '',
+            game_uid TEXT DEFAULT '',
+            deposit_amount TEXT DEFAULT '',
+            is_verified INTEGER DEFAULT 0,
             is_banned INTEGER DEFAULT 0,
             auto_signal INTEGER DEFAULT 0,
             last_msg_id INTEGER DEFAULT 0,
+            last_access_date TEXT DEFAULT '',
             joined_at TEXT DEFAULT ''
         )
     """)
@@ -62,11 +65,13 @@ def init_db():
     """)
     cur.execute("INSERT OR IGNORE INTO system_stats (id, maintenance, connected_channel_id) VALUES (1, 0, '')")
     
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for adm in ADMIN_IDS:
         cur.execute("""
-            INSERT OR IGNORE INTO users (user_id, username, first_name, is_banned, joined_at)
-            VALUES (?, 'admin', 'Super Admin', 0, ?)
-        """, (int(adm), time.strftime("%Y-%m-%d %H:%M:%S")))
+            INSERT OR IGNORE INTO users (user_id, username, first_name, is_verified, last_access_date, joined_at)
+            VALUES (?, 'admin', 'Super Admin', 1, ?, ?)
+        """, (int(adm), today_str, time.strftime("%Y-%m-%d %H:%M:%S")))
+        cur.execute("UPDATE users SET is_verified = 1, is_banned = 0, last_access_date = ? WHERE user_id = ?", (today_str, int(adm)))
         
     conn.commit()
     conn.close()
@@ -96,7 +101,7 @@ def is_admin(user_id):
         return False
 
 # ==============================================================================
-# 📡 ৩. TELEGRAM API (ওয়েবহুক মুক্ত ও হাই-স্পিড)
+# 📡 ৩. TELEGRAM API (ফিক্সড ও 409 হ্যান্ডলার সহ)
 # ==============================================================================
 def tg_api(method, payload=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -104,11 +109,15 @@ def tg_api(method, payload=None):
         data = json.dumps(payload).encode("utf-8") if payload else None
         headers = {"Content-Type": "application/json"}
         req = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(req, context=SSL_CTX, timeout=35) as res:
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=30) as res:
             return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as he:
+        if he.code == 409:
+            logging.error("⚠️ [409 Conflict] একই BOT_TOKEN অন্য কোথাও চালু আছে! @BotFather থেকে Token Revoke করুন।")
+            time.sleep(3)
+        return None
     except Exception as e:
-        err_msg = str(e).lower()
-        if "timed out" not in err_msg:
+        if "timed out" not in str(e).lower():
             logging.error(f"TG API Error ({method}): {e}")
         return None
 
@@ -181,7 +190,7 @@ class QuantumRandomEngine:
 engine = QuantumRandomEngine()
 
 # ==============================================================================
-# 🎨 ৫. কীবোর্ড ও সিগন্যাল ফরম্যাট
+# 🎨 ৫. কীবোর্ড ও সিগন্যাল টেমপ্লেট
 # ==============================================================================
 BTN_START = "⚡ 𝗦𝗧𝗔𝗥𝗧 𝗔𝗨𝗧𝗢 𝗦𝗜𝗚𝗡𝗔𝗟 ⚡"
 BTN_STOP = "🛑 𝗦𝗧𝗢𝗣 𝗦𝗜𝗚𝗡𝗔𝗟 🛑"
@@ -198,10 +207,11 @@ def get_admin_panel_markup(user_id):
     return {
         "inline_keyboard": [
             [{"text": f"⚡ লাইভ সিগন্যাল সেন্ডার ({cur_st})", "callback_data": "adm_toggle_sender"}],
-            [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
-            [{"text": "📢 চ্যানেল কানেক্ট", "callback_data": "adm_connect_channel"}, {"text": "🛠️ মেইনটেনেন্স", "callback_data": "adm_maint"}],
+            [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "⏳ পেন্ডিং রিকোয়েস্ট", "callback_data": "adm_pending"}],
+            [{"text": "📢 চ্যানেল কানেক্ট", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
+            [{"text": "🛠️ মেইনটেনেন্স", "callback_data": "adm_maint"}, {"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}],
             [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}],
-            [{"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}, {"text": "🔄 রিফ্রেশ প্যানেল", "callback_data": "adm_refresh_panel"}]
+            [{"text": "🔄 রিফ্রেশ প্যানেল", "callback_data": "adm_refresh_panel"}]
         ]
     }
 
@@ -227,10 +237,10 @@ def get_welcome_message(first_name, user_id):
         f"<b>├ 🛡️ ২-লেভেল হাই একুরেসি সেফটি বুস্টার মেথড</b>\n"
         f"<b>├ 💰 অফিসিয়াল ৭-স্টেপ মার্টিঙ্গেল ব্যাকআপ চার্ট</b>\n"
         f"<b>└ 💎 ৯৯.৮% পর্যন্ত রিয়েল-টাইম উইন রেট পারফরম্যান্স</b>\n\n"
-        f"<b>📌 প্রোফাইল ডাটা:</b>\n"
-        f"<b>├ 👤 নাম       : {first_name}</b>\n"
-        f"<b>├ 🆔 ট্রেডার আইডি: <code>{user_id}</code></b>\n"
-        f"<b>└ 🔰 স্ট্যাটাস   : 🟢 𝗩𝗜𝗣 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗔𝗖𝗧𝗜𝗩𝗘</b>\n\n"
+        f"<b>📌 ট্রেডার প্রোফাইল ডাটা:</b>\n"
+        f"<b>├ 👤 ট্রেডার নাম   : {first_name}</b>\n"
+        f"<b>├ 🆔 ট্রেডার আইডি : <code>{user_id}</code></b>\n"
+        f"<b>└ 🔰 স্ট্যাটাস     : 🟢 𝗩𝗜𝗣 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗔𝗖𝗧𝗜𝗩𝗘</b>\n\n"
         f"<b>💡 নিচের বাটনগুলো চেপে আপনার সিগন্যাল সার্ভিস এখনই শুরু করুন।</b>\n"
         f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
     )
@@ -258,19 +268,18 @@ def format_signal_msg(period, pred, numbers=None, level=1):
     )
 
 # ==============================================================================
-# 🎮 ৬. কন্ট্রোলার ও পোলিং হ্যান্ডলার
+# 🎮 ৬. কন্ট্রোলার ও মেসেজ প্রসেসর
 # ==============================================================================
 waiting_broadcast_admin = None
 waiting_ban_admin = None
 waiting_unban_admin = None
 waiting_channel_admin = None
+user_submit_state = {}
 
 def process_updates():
     global waiting_broadcast_admin, waiting_ban_admin, waiting_unban_admin, waiting_channel_admin
-    global admin_live_sender_mode
+    global admin_live_sender_mode, user_submit_state
     offset = 0
-
-    logging.info("🚀 Long-Polling System Active & Listening for Updates...")
 
     while True:
         try:
@@ -279,7 +288,7 @@ def process_updates():
                 for u in updates["result"]:
                     offset = u["update_id"] + 1
 
-                    # ----------------- ১. CALLBACK QUERY (ইনলাইন বাটন ক্লিক) -----------------
+                    # ----------------- ১. CALLBACK QUERY (ইনলাইন বাটন) -----------------
                     if "callback_query" in u:
                         cq = u["callback_query"]
                         cq_id = cq["id"]
@@ -290,14 +299,40 @@ def process_updates():
                         chat_id = msg_obj.get("chat", {}).get("id", user_id)
                         msg_id = msg_obj.get("message_id")
 
-                        # সাথে সাথে অ্যান্সার দিয়ে টেলিগ্রামের লোডিং বন্ধ করা
+                        # বাটন ক্লিকে লোডিং বন্ধ করা
                         answer_callback(cq_id)
-                        logging.info(f"🔘 Button Clicked by [{user_id}]: {data}")
 
-                        # এডমিন অপশনস হ্যান্ডলিং
+                        # ইউজার ফর্ম সাবমিট রিকোয়েস্ট
+                        if data == "usr_submit_form":
+                            user_submit_state[user_id] = {"step": 1, "uid": ""}
+                            send_msg(user_id, "<b>✍️ অনুগ্রহ করে আপনার গেমের সঠিক User ID (UID) টি লিখে পাঠান:</b>")
+                            continue
+
+                        # এডমিন বাটন প্রসেসিং
                         if is_admin(user_id):
                             if data in ["adm_refresh_panel", "adm_back_panel"]:
                                 edit_msg(chat_id, msg_id, "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\nসম্পূর্ণ সিস্টেম কন্ট্রোল করতে নিচের অপশন ব্যবহার করুন।", get_admin_panel_markup(user_id))
+                                continue
+
+                            # ইউজার অ্যাপ্রুভ
+                            elif data.startswith("app_"):
+                                target_id = int(data.split("_")[1])
+                                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                                db_query("UPDATE users SET is_verified = 1, is_banned = 0, last_access_date = ? WHERE user_id = ?", (today_str, target_id), commit=True)
+                                edit_msg(chat_id, msg_id, f"<b>✅ ইউজার <code>{target_id}</code> সফলভাবে আজকের জন্য অ্যাপ্রুভ করা হয়েছে!</b>")
+                                send_msg(
+                                    target_id,
+                                    f"<b>🎉 অভিনন্দন! আপনার UID ও ডিপোজিট এডমিন কর্তৃক অনুমোদিত হয়েছে!</b>\n\n<b>এখন আপনি আজকের জন্য 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 সার্ভিসের পূর্ণ এক্সেস পেয়ে গেছেন।</b>\n\n👉 {REGISTER_LINK}",
+                                    get_main_keyboard(target_id)
+                                )
+                                continue
+
+                            # ইউজার রিজেক্ট
+                            elif data.startswith("rej_"):
+                                target_id = int(data.split("_")[1])
+                                db_query("UPDATE users SET is_verified = -1, is_banned = 1, auto_signal = 0 WHERE user_id = ?", (target_id,), commit=True)
+                                edit_msg(chat_id, msg_id, f"<b>🚫 ইউজার <code>{target_id}</code> রিজেক্ট ও ব্যান করা হয়েছে।</b>")
+                                send_msg(target_id, "<b>❌ দুঃখিত! আপনার প্রদত্ত UID বা ডিপোজিট ডাটা সঠিক না থাকায় এক্সেস রিজেক্ট করা হয়েছে।</b>")
                                 continue
 
                             elif data == "adm_maint":
@@ -322,22 +357,49 @@ def process_updates():
                                 continue
 
                             elif data == "adm_users":
-                                users = db_query("SELECT user_id, is_banned, auto_signal FROM users", fetchall=True) or []
+                                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                                users = db_query("SELECT user_id, is_banned, auto_signal, is_verified, last_access_date FROM users", fetchall=True) or []
                                 tot = len(users)
                                 aut = sum(1 for x in users if x[2] == 1)
                                 ban = sum(1 for x in users if x[1] == 1)
+                                verified = sum(1 for x in users if x[3] == 1 and x[4] == today_str)
+                                pending = sum(1 for x in users if x[3] == 0)
                                 send_msg(
                                     user_id,
                                     f"<b>📊 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 ইউজার অ্যানালিটিক্স:</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━</b>\n"
                                     f"<b>👥 মোট ইউজার             : <code>{tot}</code> জন</b>\n"
+                                    f"<b>🟢 আজকের ভেরিফাইড ইউজার : <code>{verified}</code> জন</b>\n"
+                                    f"<b>⏳ পেন্ডিং সাবমিশন        : <code>{pending}</code> জন</b>\n"
                                     f"<b>⚡ লাইভ অটো সিগন্যাল ইউজার: <code>{aut}</code> জন</b>\n"
                                     f"<b>🚫 ব্যানড ইউজার            : <code>{ban}</code> জন</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━</b>"
                                 )
                                 continue
 
+                            elif data == "adm_pending":
+                                pendings = db_query("SELECT user_id, first_name, username, game_uid, deposit_amount FROM users WHERE is_verified = 0 AND deposit_amount != ''", fetchall=True) or []
+                                if not pendings:
+                                    send_msg(user_id, "<b>✅ বর্তমানে কোনো পেন্ডিং রিকোয়েস্ট নেই।</b>")
+                                else:
+                                    send_msg(user_id, f"<b>⏳ মোট পেন্ডিং রিকোয়েস্ট: {len(pendings)} জন</b>")
+                                    for p in pendings[:5]:
+                                        p_kb = {
+                                            "inline_keyboard": [
+                                                [
+                                                    {"text": "✅ Approve", "callback_data": f"app_{p[0]}"},
+                                                    {"text": "🚫 Reject", "callback_data": f"rej_{p[0]}"}
+                                                ]
+                                            ]
+                                        }
+                                        send_msg(
+                                            user_id,
+                                            f"<b>👤 নাম            : {p[1]}\n🆔 টেলিগ্রাম আইডি: <code>{p[0]}</code>\n🔗 ইউজারনেম     : @{p[2]}\n🎮 গেম UID       : <code>{p[3]}</code>\n💰 ডিপোজিট       : <code>{p[4]} BDT</code></b>",
+                                            p_kb
+                                        )
+                                continue
+
                             elif data == "adm_bc":
                                 waiting_broadcast_admin = user_id
-                                send_msg(user_id, "<b>✍️ ব্রডকাস্ট মেসেজটি পাঠান (ছবি, ভিডিও, ফাইল, স্টিকার বা টেক্সট):</b>\n\nবাতিল করতে <code>/cancel</code> লিখুন।")
+                                send_msg(user_id, "<b>✍️ ব্রডকাস্ট মেসেজটি পাঠান (ছবি, ভিডিও, ফাইল বা টেক্সট):</b>\n\nবাতিল করতে <code>/cancel</code> লিখুন।")
                                 continue
 
                             elif data == "adm_ban_user":
@@ -358,7 +420,7 @@ def process_updates():
                             send_msg(user_id, f"<b>🚫 আপনার এই অপশন ব্যবহারের অনুমতি নেই। (আপনার ID: <code>{user_id}</code>)</b>")
                             continue
 
-                    # ----------------- ২. MESSAGE HANDLING (টেক্সট মেসেজ) -----------------
+                    # ----------------- ২. MESSAGE HANDLING (মেসেজ হ্যান্ডলার) -----------------
                     if "message" in u:
                         msg = u["message"]
                         chat_id = msg["chat"]["id"]
@@ -368,14 +430,16 @@ def process_updates():
                         first_name = msg.get("from", {}).get("first_name", "VIP Trader")
                         username = msg.get("from", {}).get("username", "None")
 
+                        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        default_ver = 1 if is_admin(chat_id) else 0
+
                         db_query("""
-                            INSERT OR IGNORE INTO users (user_id, username, first_name, joined_at)
-                            VALUES (?, ?, ?, ?)
-                        """, (chat_id, username, first_name, time.strftime("%Y-%m-%d %H:%M:%S")), commit=True)
+                            INSERT OR IGNORE INTO users (user_id, username, first_name, is_verified, last_access_date, joined_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (chat_id, username, first_name, default_ver, today_str if default_ver == 1 else '', time.strftime("%Y-%m-%d %H:%M:%S")), commit=True)
 
-                        usr = db_query("SELECT is_banned, auto_signal, last_msg_id FROM users WHERE user_id = ?", (chat_id,), fetchone=True)
+                        usr = db_query("SELECT is_banned, auto_signal, last_msg_id, is_verified, last_access_date, game_uid, deposit_amount FROM users WHERE user_id = ?", (chat_id,), fetchone=True)
 
-                        # ব্যান চেক
                         if usr and usr[0] == 1 and not is_admin(chat_id):
                             send_msg(chat_id, "<b>🚫 আপনার অ্যাকাউন্টটি ব্যান রয়েছে। সহায়তার জন্য সাপোর্টে যোগাযোগ করুন।</b>")
                             continue
@@ -452,10 +516,73 @@ def process_updates():
                                 waiting_unban_admin = None
                                 try:
                                     t_id = int(text)
-                                    db_query("UPDATE users SET is_banned = 0 WHERE user_id = ?", (t_id,), commit=True)
-                                    send_msg(chat_id, f"<b>✅ ইউজার <code>{t_id}</code> সফলভাবে আনব্যান করা হয়েছে।</b>")
+                                    db_query("UPDATE users SET is_banned = 0, is_verified = 1, last_access_date = ? WHERE user_id = ?", (today_str, t_id), commit=True)
+                                    send_msg(chat_id, f"<b>✅ ইউজার <code>{t_id}</code> আনব্যান ও আজকের জন্য ভেরিফাই করা হয়েছে।</b>")
                                 except ValueError:
                                     send_msg(chat_id, "<b>❌ সঠিক নিউমেরিক ইউজার আইডি দিন!</b>")
+                                continue
+
+                        # ইউজার UID ও ডিপোজিট সাবমিশন
+                        if chat_id in user_submit_state and text:
+                            st = user_submit_state[chat_id]
+                            if st["step"] == 1:
+                                user_submit_state[chat_id]["uid"] = text
+                                user_submit_state[chat_id]["step"] = 2
+                                send_msg(chat_id, f"<b>✅ UID সংরক্ষিত: <code>{text}</code>\n\n💰 এবার আপনার আজকের ডিপোজিট অ্যামাউন্ট (BDT) লিখে পাঠান:</b>")
+                                continue
+                            elif st["step"] == 2:
+                                uid_val = st["uid"]
+                                dep_val = text
+                                del user_submit_state[chat_id]
+                                
+                                db_query("UPDATE users SET game_uid = ?, deposit_amount = ?, is_verified = 0 WHERE user_id = ?", (uid_val, dep_val, chat_id), commit=True)
+                                
+                                send_msg(
+                                    chat_id,
+                                    f"<b>✅ আপনার তথ্য সফলভাবে এডমিনের কাছে জমা হয়েছে!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"🎮 <b>গেম UID    :</b> <code>{uid_val}</code>\n"
+                                    f"💰 <b>ডিপোজিট   :</b> <code>{dep_val} BDT</code>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"<i>এডমিন দ্রুত ভেরিফাই করে এক্সেস চালু করবেন। অনুগ্রহ করে অপেক্ষা করুন।</i>"
+                                )
+                                
+                                req_kb = {
+                                    "inline_keyboard": [
+                                        [
+                                            {"text": "✅ Approve", "callback_data": f"app_{chat_id}"},
+                                            {"text": "🚫 Reject", "callback_data": f"rej_{chat_id}"}
+                                        ]
+                                    ]
+                                }
+                                for adm in ADMIN_IDS:
+                                    send_msg(
+                                        adm,
+                                        f"<b>🔔 নতুন সাবমিশন এসেছে!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                                        f"👤 <b>নাম            :</b> {first_name}\n"
+                                        f"🆔 <b>টেলিগ্রাম আইডি:</b> <code>{chat_id}</code>\n"
+                                        f"🔗 <b>ইউজারনেম     :</b> @{username}\n"
+                                        f"🎮 <b>গেম UID       :</b> <code>{uid_val}</code>\n"
+                                        f"💰 <b>ডিপোজিট       :</b> <code>{dep_val} BDT</code>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                                        f"অনুমোদন দিতে চান?",
+                                        req_kb
+                                    )
+                                continue
+
+                        # সাধারণ ইউজারদের দৈনিক ভেরিফিকেশন চেক
+                        if not is_admin(chat_id):
+                            if not usr or usr[3] != 1 or usr[4] != today_str:
+                                sub_kb = {
+                                    "inline_keyboard": [
+                                        [{"text": "📝 সাবমিট করুন (UID ও ডিপোজিট)", "callback_data": "usr_submit_form"}]
+                                    ]
+                                }
+                                send_msg(
+                                    chat_id,
+                                    f"<b>🔒 দৈনিক এক্সেস ভেরিফিকেশন প্রয়োজন!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"<b>প্রিয় {first_name},</b> আজকের ভিআইপি সিগন্যাল সার্ভার এক্সেস করতে আপনার গেম <b>UID</b> এবং <b>ডিপোজিট অ্যামাউন্ট</b> সাবমিট করুন।\n\n"
+                                    f"<i>(প্রতিদিন রাত ১২:০০ টার পর নতুন দিনের জন্য এক্সেস নবায়ন করতে হয়)</i>\n\n"
+                                    f"👉 <b>নিচের বাটনে ক্লিক করে তথ্য সাবমিট করুন:</b>",
+                                    sub_kb
+                                )
                                 continue
 
                         # মেইনটেনেন্স চেক
@@ -560,14 +687,24 @@ def process_updates():
             time.sleep(1)
 
 # ==============================================================================
-# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল অটো রিপ্লেস ক্রন
+# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল ও রাত ১২টার মিডনাইট রিসেট ক্রন
 # ==============================================================================
 def live_auto_signal_loop():
     logging.info("⚡ 1-Minute Live Signal Loop Started...")
     current_period = get_exact_game_period()
+    today_check = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     while True:
         try:
+            current_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            # রাত ১২:০০ টার অটো-রিসেট
+            if current_day != today_check:
+                today_check = current_day
+                adm_ids_str = ",".join(str(int(x)) for x in ADMIN_IDS)
+                db_query(f"UPDATE users SET is_verified = 0, auto_signal = 0 WHERE user_id NOT IN ({adm_ids_str})", commit=True)
+                logging.info(f"🌙 Midnight reset completed for date: {current_day}")
+
             new_period = get_exact_game_period()
 
             if new_period != current_period:
@@ -577,7 +714,7 @@ def live_auto_signal_loop():
                 lvl = random.choice([1, 2])
                 sig_msg = format_signal_msg(current_period, pred, nums, lvl)
 
-                active_users = db_query("SELECT user_id, last_msg_id FROM users WHERE auto_signal = 1 AND is_banned = 0", fetchall=True) or []
+                active_users = db_query("SELECT user_id, last_msg_id FROM users WHERE auto_signal = 1 AND is_banned = 0 AND is_verified = 1 AND last_access_date = ?", (current_day,), fetchall=True) or []
 
                 for u in active_users:
                     uid, old_mid = u[0], u[1]
@@ -594,7 +731,7 @@ def live_auto_signal_loop():
         time.sleep(1)
 
 # ==============================================================================
-# 🌐 ৮. হেলথ চেক ওয়েব সার্ভার (২৪/৭ পোর্ট ম্যানেজমেন্ট)
+# 🌐 ৮. হেলথ চেক ওয়েব সার্ভার (২৪/৭ আপটাইমের জন্য)
 # ==============================================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -608,20 +745,16 @@ class HealthHandler(BaseHTTPRequestHandler):
 def run_health_server():
     try:
         server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-        logging.info(f"🌐 Health Server running successfully on port {PORT}")
+        logging.info(f"🌐 Health Server running on port {PORT}")
         server.serve_forever()
     except Exception as e:
         logging.warning(f"Health server port binding issue: {e}")
 
 # ==============================================================================
-# 🚀 ৯. মেইন রানার (ওয়েবহুক ক্লিনার সহ)
+# 🚀 ৯. মেইন রানার
 # ==============================================================================
 if __name__ == "__main__":
     init_db()
-    
-    # 🔥 টেলিগ্রামের সমস্ত পুরনো ব্লক/ওয়েবহুক এক ক্লিকে মুছে ফেলা
-    logging.info("🧹 Clearing previous Webhook & pending queue...")
-    tg_api("deleteWebhook", {"drop_pending_updates": True})
     
     # ব্যাকগ্রাউন্ড থ্রেড রান
     threading.Thread(target=run_health_server, daemon=True).start()
