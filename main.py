@@ -1,3 +1,4 @@
+
 import os
 import ssl
 import json
@@ -14,7 +15,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ==============================================================================
 # ⚙️ ১. কনফিগারেশন সেটিংস
 # ==============================================================================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8968313328:AAGZSQ0BzAfj_AaIJTq3wtWbrjsCAct8Sps")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8865815253:AAHhWKutyrgH0XxfFUgFlvIp0HVBnBjdHdM")
 ADMIN_IDS = [6753121703, 7122259829]
 
 env_adm = os.environ.get("ADMIN_IDS", "")
@@ -24,7 +25,6 @@ if env_adm:
             ADMIN_IDS.append(int(a.strip()))
 
 SUPPORT_USERNAME = "SAGOR_TREDER"
-REGISTER_LINK = "https://dkwin0.com/#/register?invitationCode=68816100046"
 PORT = int(os.environ.get("PORT", 8080))
 
 SSL_CTX = ssl.create_default_context()
@@ -101,7 +101,7 @@ def is_admin(user_id):
         return False
 
 # ==============================================================================
-# 📡 ৩. TELEGRAM API (ফিক্সড ও 409 হ্যান্ডলার সহ)
+# 📡 ৩. TELEGRAM API
 # ==============================================================================
 def tg_api(method, payload=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -113,7 +113,7 @@ def tg_api(method, payload=None):
             return json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as he:
         if he.code == 409:
-            logging.error("⚠️ [409 Conflict] একই BOT_TOKEN অন্য কোথাও চালু আছে! @BotFather থেকে Token Revoke করুন।")
+            logging.error("⚠️ [409 Conflict] একই BOT_TOKEN অন্য কোথাও চালু আছে! @BotFather থেকে Token Revoke করে নতুন টোকেন নিন।")
             time.sleep(3)
         return None
     except Exception as e:
@@ -231,7 +231,7 @@ def get_welcome_message(first_name, user_id):
         f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
         f"<b>🌟 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 𝗦𝗘𝗥𝗩𝗘𝗥 𝗩𝟮𝟬-এ আপনাকে স্বাগতম!</b>\n\n"
         f"<b>🚀 এটি বিশ্বের অন্যতম শক্তিশালী AI চালিত ১-মিনিট ডাইনামিক উইংগো প্রেডিকশন সিস্টেম।</b>\n\n"
-        f"<b>🎯 আমাদের সুবিধাসমূহ:</b>\n"
+        f"<b>🎯 আমাদের বিশেষ সুবিধাসমূহ:</b>\n"
         f"<b>├ 🟢 অটো লাইভ রিপ্লেস : প্রতি মিনিটে সিগন্যাল স্বয়ংক্রিয়ভাবে আপডেট হবে</b>\n"
         f"<b>├ 🎯 BIG & SMALL নিখুঁত ট্রেন্ড ফিল্টারিং</b>\n"
         f"<b>├ 🛡️ ২-লেভেল হাই একুরেসি সেফটি বুস্টার মেথড</b>\n"
@@ -262,9 +262,7 @@ def format_signal_msg(period, pred, numbers=None, level=1):
         f"📊 <b>𝗖𝗢𝗡𝗙𝗜𝗗𝗘𝗡𝗖𝗘</b>    : <code>{confidence}%</code> [{accuracy_bar}]\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💎 <b>𝗦𝗘𝗥𝗩𝗘𝗥 𝗦𝗧𝗔𝗧𝗨𝗦</b> : 🟢 <b>𝗢𝗡𝗟𝗜𝗡𝗘 & 𝗦𝗬𝗡𝗖𝗘𝗗</b>\n"
-        f"⚠️ <b>জরুরি গাইডলাইন</b>: সবসময় ৭-স্টেপ ফান্ড ব্যাকআপ মেনে চলুন!\n"
-        f"👉 <b>রেজিস্ট্রেশন লিংক</b>: {REGISTER_LINK}\n"
-        f"📡 <b>CONTACK</b> @{SUPPORT_USERNAME}"
+        f"⚠️ <b>জরুরি গাইডলাইন</b>: সবসময় ৭-স্টেপ ফান্ড ব্যাকআপ মেনে চলুন!"
     )
 
 # ==============================================================================
@@ -299,10 +297,10 @@ def process_updates():
                         chat_id = msg_obj.get("chat", {}).get("id", user_id)
                         msg_id = msg_obj.get("message_id")
 
-                        # বাটন ক্লিকে লোডিং বন্ধ করা
+                        # বাটন ক্লিকে সাথে সাথে লোডিং বন্ধ করা
                         answer_callback(cq_id)
 
-                        # ইউজার ফর্ম সাবমিট রিকোয়েস্ট
+                        # ইউজার ফর্ম সাবমিট
                         if data == "usr_submit_form":
                             user_submit_state[user_id] = {"step": 1, "uid": ""}
                             send_msg(user_id, "<b>✍️ অনুগ্রহ করে আপনার গেমের সঠিক User ID (UID) টি লিখে পাঠান:</b>")
@@ -314,7 +312,6 @@ def process_updates():
                                 edit_msg(chat_id, msg_id, "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\nসম্পূর্ণ সিস্টেম কন্ট্রোল করতে নিচের অপশন ব্যবহার করুন।", get_admin_panel_markup(user_id))
                                 continue
 
-                            # ইউজার অ্যাপ্রুভ
                             elif data.startswith("app_"):
                                 target_id = int(data.split("_")[1])
                                 today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -322,12 +319,11 @@ def process_updates():
                                 edit_msg(chat_id, msg_id, f"<b>✅ ইউজার <code>{target_id}</code> সফলভাবে আজকের জন্য অ্যাপ্রুভ করা হয়েছে!</b>")
                                 send_msg(
                                     target_id,
-                                    f"<b>🎉 অভিনন্দন! আপনার UID ও ডিপোজিট এডমিন কর্তৃক অনুমোদিত হয়েছে!</b>\n\n<b>এখন আপনি আজকের জন্য 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 সার্ভিসের পূর্ণ এক্সেস পেয়ে গেছেন।</b>\n\n👉 {REGISTER_LINK}",
+                                    f"<b>🎉 অভিনন্দন! আপনার UID ও ডিপোজিট এডমিন কর্তৃক অনুমোদিত হয়েছে!</b>\n\n<b>এখন আপনি আজকের জন্য 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 সার্ভিসের পূর্ণ এক্সেস পেয়ে গেছেন।</b>",
                                     get_main_keyboard(target_id)
                                 )
                                 continue
 
-                            # ইউজার রিজেক্ট
                             elif data.startswith("rej_"):
                                 target_id = int(data.split("_")[1])
                                 db_query("UPDATE users SET is_verified = -1, is_banned = 1, auto_signal = 0 WHERE user_id = ?", (target_id,), commit=True)
@@ -420,7 +416,7 @@ def process_updates():
                             send_msg(user_id, f"<b>🚫 আপনার এই অপশন ব্যবহারের অনুমতি নেই। (আপনার ID: <code>{user_id}</code>)</b>")
                             continue
 
-                    # ----------------- ২. MESSAGE HANDLING (মেসেজ হ্যান্ডলার) -----------------
+                    # ----------------- ২. MESSAGE HANDLING -----------------
                     if "message" in u:
                         msg = u["message"]
                         chat_id = msg["chat"]["id"]
@@ -450,15 +446,14 @@ def process_updates():
                                 waiting_broadcast_admin = None
                                 users = db_query("SELECT user_id FROM users WHERE is_banned = 0", fetchall=True) or []
                                 c = 0
-                                extra_footer = f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n👉 <b>রেজিস্ট্রেশন লিংক:</b> {REGISTER_LINK}\n📡 <b>CONTACK:</b> @{SUPPORT_USERNAME}"
                                 for row in users:
                                     try:
                                         target_uid = row[0]
                                         if text:
-                                            full_text = f"<b>📢 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 অফিসিয়াল নোটিশ:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n{text}{extra_footer}"
+                                            full_text = f"<b>📢 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 অফিসিয়াল নোটিশ:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n{text}"
                                             send_msg(target_uid, full_text)
                                         else:
-                                            new_cap = f"{caption}{extra_footer}" if caption else f"<b>📢 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 নোটিশ</b>{extra_footer}"
+                                            new_cap = f"{caption}" if caption else f"<b>📢 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 নোটিশ</b>"
                                             copy_msg(target_uid, chat_id, msg_id, caption=new_cap if "sticker" not in msg else None)
                                         c += 1
                                         time.sleep(0.04)
@@ -592,7 +587,7 @@ def process_updates():
                             send_msg(chat_id, "<b>🛠️ সার্ভারে মেইনটেনেন্স ও আপগ্রেডেশনের কাজ চলছে! অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।</b>")
                             continue
 
-                        # বাটন কমান্ড হ্যান্ডলিং
+                        # মেনু অপশন
                         if text == "/start":
                             send_msg(chat_id, get_welcome_message(first_name, chat_id), get_main_keyboard(chat_id))
 
@@ -637,7 +632,7 @@ def process_updates():
                                 em = "<b>BIG</b>" if sim_pred == "BIG" else "<b>SMALL</b>"
                                 lvl_t = "𝗟𝗩𝗟 𝟮" if i % 3 == 1 else "𝗟𝗩𝗟 𝟭"
                                 fut_txt += f"<b>⚡ <code>{fp[-4:]}</code> : {em} | 🔢 <code>{sim_nums[0]},{sim_nums[1]}</code> ({lvl_t})</b>\n"
-                            fut_txt += f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n👉 {REGISTER_LINK}\n💡 মার্কেট সাইকেল ও প্যাটার্ন অনুযায়ী সিগন্যাল নিয়মিত রিফ্রেশ হয়।</b>"
+                            fut_txt += f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 মার্কেট সাইকেল ও প্যাটার্ন অনুযায়ী সিগন্যাল নিয়মিত রিফ্রেশ হয়।</b>"
                             send_msg(chat_id, fut_txt)
 
                         elif text == BTN_RADAR:
@@ -649,7 +644,7 @@ def process_updates():
                                 "<b>🔥 মার্কেট মোড        : <code>ZIG-ZAG ALTERNATING (BALANCED)</code></b>\n"
                                 "<b>🛡️ রিস্ক লেভেল       : <code>LOW RISK (STABLE)</code></b>\n"
                                 "<b>📊 অ্যালগরিদম        : <code>AI 99.2% ACCURACY</code></b>\n"
-                                f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n👉 {REGISTER_LINK}\n💡 বর্তমান ট্রেন্ড সুষম এবং হাই-কনফিডেন্স ট্রেডের জন্য সম্পূর্ণ অনুকূল।</b>"
+                                f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 বর্তমান ট্রেন্ড সুষম এবং ট্রেডের জন্য সম্পূর্ণ অনুকূল।</b>"
                             )
                             send_msg(chat_id, radar_txt)
 
@@ -666,8 +661,7 @@ def process_updates():
                                 "<b>🔹 𝗦𝘁𝗲𝗽 𝟳 : <code>503.94 BDT</code> ➜ (হাই সিকিউর প্রফিট)</b>\n"
                                 "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
                                 "<b>💎 মোট প্রয়োজনীয় ব্যাকআপ ফান্ড : <code>1000 BDT</code></b>\n"
-                                "<b>⚠️ মনে রাখবেন: মানি ম্যানেজমেন্ট না মানলে কোনো অ্যালগরিদমই লাভ দিতে পারবে না।</b>\n"
-                                f"👉 <b>রেজিস্ট্রেশন লিংক:</b> {REGISTER_LINK}"
+                                "<b>⚠️ মনে রাখবেন: মানি ম্যানেজমেন্ট না মানলে লাভ ধরে রাখা সম্ভব নয়।</b>"
                             )
                             send_msg(chat_id, fund_txt)
 
@@ -675,11 +669,10 @@ def process_updates():
                             send_msg(
                                 chat_id,
                                 f"<b>💬 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 অফিসিয়াল সাপোর্ট ও হেল্পডেস্ক</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-                                f"<b>যেকোনো প্রশ্ন বা ব্যালেন্স সংক্রান্ত বিষয়ে সরাসরি যোগাযোগ করুন:</b>\n\n"
+                                f"<b>যেকোনো প্রশ্ন বা অ্যাকাউন্টের বিষয়ে সরাসরি যোগাযোগ করুন:</b>\n\n"
                                 f"<b>👑 সাপোর্ট ইনবক্স : @{SUPPORT_USERNAME}</b>\n"
                                 f"<b>⏰ একটিভ টাইম    : 24/7 অনলাইন ইনস্ট্যান্ট রেসপন্স</b>\n"
-                                f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-                                f"👉 {REGISTER_LINK}"
+                                f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
                             )
 
         except Exception as e:
@@ -687,7 +680,7 @@ def process_updates():
             time.sleep(1)
 
 # ==============================================================================
-# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল ও রাত ১২টার মিডনাইট রিসেট ক্রন
+# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল ও মিডনাইট রিসেট ক্রন
 # ==============================================================================
 def live_auto_signal_loop():
     logging.info("⚡ 1-Minute Live Signal Loop Started...")
@@ -731,7 +724,7 @@ def live_auto_signal_loop():
         time.sleep(1)
 
 # ==============================================================================
-# 🌐 ৮. হেলথ চেক ওয়েব সার্ভার (২৪/৭ আপটাইমের জন্য)
+# 🌐 ৮. হেলথ চেক ওয়েব সার্ভার (২৪/৭ পোর্ট ম্যানেজমেন্ট)
 # ==============================================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -748,7 +741,7 @@ def run_health_server():
         logging.info(f"🌐 Health Server running on port {PORT}")
         server.serve_forever()
     except Exception as e:
-        logging.warning(f"Health server port binding issue: {e}")
+        logging.warning(f"Health server port issue: {e}")
 
 # ==============================================================================
 # 🚀 ৯. মেইন রানার
