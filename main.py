@@ -1,3 +1,4 @@
+
 import os
 import ssl
 import json
@@ -17,10 +18,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8968313328:AAGZSQ0BzAfj_AaIJTq3wtWbrjsCAct8Sps")
 ADMIN_IDS = [6753121703, 7122259829]
 
-# অতিরিক্ত এনভায়রনমেন্ট এডমিন সাপোর্ট
-env_admins = os.environ.get("ADMIN_IDS", "")
-if env_admins:
-    for a in env_admins.split(","):
+# এনভায়রনমেন্টে কোনো অতিরিক্ত এডমিন থাকলে যুক্ত করা
+env_adm = os.environ.get("ADMIN_IDS", "")
+if env_adm:
+    for a in env_adm.split(","):
         if a.strip().isdigit() and int(a.strip()) not in ADMIN_IDS:
             ADMIN_IDS.append(int(a.strip()))
 
@@ -47,13 +48,9 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             username TEXT DEFAULT '',
             first_name TEXT DEFAULT '',
-            game_uid TEXT DEFAULT '',
-            deposit_amount TEXT DEFAULT '',
-            is_verified INTEGER DEFAULT 0,
             is_banned INTEGER DEFAULT 0,
             auto_signal INTEGER DEFAULT 0,
             last_msg_id INTEGER DEFAULT 0,
-            last_access_date TEXT DEFAULT '',
             joined_at TEXT DEFAULT ''
         )
     """)
@@ -66,13 +63,11 @@ def init_db():
     """)
     cur.execute("INSERT OR IGNORE INTO system_stats (id, maintenance, connected_channel_id) VALUES (1, 0, '')")
     
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     for adm in ADMIN_IDS:
         cur.execute("""
-            INSERT OR IGNORE INTO users (user_id, username, first_name, is_verified, last_access_date, joined_at)
-            VALUES (?, 'admin', 'Super Admin', 1, ?, ?)
-        """, (int(adm), today_str, time.strftime("%Y-%m-%d %H:%M:%S")))
-        cur.execute("UPDATE users SET is_verified = 1, is_banned = 0, last_access_date = ? WHERE user_id = ?", (today_str, int(adm)))
+            INSERT OR IGNORE INTO users (user_id, username, first_name, is_banned, joined_at)
+            VALUES (?, 'admin', 'Super Admin', 0, ?)
+        """, (int(adm), time.strftime("%Y-%m-%d %H:%M:%S")))
         
     conn.commit()
     conn.close()
@@ -102,7 +97,7 @@ def is_admin(user_id):
         return False
 
 # ==============================================================================
-# 📡 ৩. TELEGRAM API ফাংশনস
+# 📡 ৩. TELEGRAM API (ফিক্সড ও হাই-স্পিড)
 # ==============================================================================
 def tg_api(method, payload=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -110,10 +105,12 @@ def tg_api(method, payload=None):
         data = json.dumps(payload).encode("utf-8") if payload else None
         headers = {"Content-Type": "application/json"}
         req = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(req, context=SSL_CTX, timeout=12) as res:
+        # লং পোলিংয়ের জন্য ৩০ সেকেন্ড টাইমআউট
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=30) as res:
             return json.loads(res.read().decode("utf-8"))
     except Exception as e:
-        logging.error(f"TG API Error ({method}): {e}")
+        if "timed out" not in str(e).lower():
+            logging.error(f"TG API Error ({method}): {e}")
         return None
 
 def send_msg(chat_id, text, reply_markup=None):
@@ -154,7 +151,11 @@ def edit_msg(chat_id, msg_id, text, reply_markup=None):
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    return tg_api("editMessageText", payload)
+    res = tg_api("editMessageText", payload)
+    if not res:
+        # কোনো কারণে এডিট না হলে নতুন মেসেজ পাঠিয়ে দেওয়া
+        return send_msg(chat_id, text, reply_markup)
+    return res
 
 # ==============================================================================
 # 🎯 ৪. প্রেডিকশন ইঞ্জিন
@@ -182,7 +183,7 @@ class QuantumRandomEngine:
 engine = QuantumRandomEngine()
 
 # ==============================================================================
-# 🎨 ৫. কীবোর্ড ও মেসেজ টেমপ্লেট
+# 🎨 ৫. কীবোর্ড ও সিগন্যাল টেমপ্লেট
 # ==============================================================================
 BTN_START = "⚡ 𝗦𝗧𝗔𝗥𝗧 𝗔𝗨𝗧𝗢 𝗦𝗜𝗚𝗡𝗔𝗟 ⚡"
 BTN_STOP = "🛑 𝗦𝗧𝗢𝗣 𝗦𝗜𝗚𝗡𝗔𝗟 🛑"
@@ -192,16 +193,17 @@ BTN_FUND = "💰 𝟳-𝗦𝗧𝗘𝗣 𝗙𝗨𝗡𝗗 𝗠𝗔𝗡𝗔𝗚𝗘
 BTN_SUPPORT = "💬 𝗩𝗜𝗣 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 💬"
 BTN_ADMIN = "👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗣𝗔𝗡𝗘𝗟 👑"
 
+admin_live_sender_mode = {}
+
 def get_admin_panel_markup(user_id):
     cur_st = "🟢 চালু" if admin_live_sender_mode.get(int(user_id), False) else "🔴 বন্ধ"
     return {
         "inline_keyboard": [
             [{"text": f"⚡ লাইভ সিগন্যাল মোড ({cur_st})", "callback_data": "adm_toggle_sender"}],
-            [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "⏳ পেন্ডিং রিকোয়েস্ট", "callback_data": "adm_pending"}],
-            [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
-            [{"text": "🛠️ মেইনটেনেন্স মোড", "callback_data": "adm_maint"}, {"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}],
+            [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
+            [{"text": "📢 চ্যানেল কানেক্ট", "callback_data": "adm_connect_channel"}, {"text": "🛠️ মেইনটেনেন্স", "callback_data": "adm_maint"}],
             [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}],
-            [{"text": "🔄 প্যানেল রিফ্রেশ", "callback_data": "adm_refresh_panel"}]
+            [{"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}, {"text": "🔄 প্যানেল রিফ্রেশ", "callback_data": "adm_refresh_panel"}]
         ]
     }
 
@@ -220,18 +222,18 @@ def get_welcome_message(first_name, user_id):
         f"<b>👑 স্বাগতম, {first_name}! 👑</b>\n"
         f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
         f"<b>🌟 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 𝗦𝗘𝗥𝗩𝗘𝗥 𝗩𝟮𝟬-এ আপনাকে স্বাগতম!</b>\n\n"
-        f"<b>🚀 এটি বিশ্বের অন্যতম শক্তিশালী AI চালিত ১-মিনিট ডাইনামিক প্রেডিকশন সিস্টেম যা উইংগো অ্যালগরিদম নিখুঁতভাবে ইনজেক্ট করে।</b>\n\n"
-        f"<b>🎯 আমাদের বিশেষ ফিচারসমূহ:</b>\n"
+        f"<b>🚀 এটি বিশ্বের অন্যতম শক্তিশালী AI চালিত ১-মিনিট ডাইনামিক উইংগো প্রেডিকশন সিস্টেম।</b>\n\n"
+        f"<b>🎯 আমাদের বিশেষ সুবিধাসমূহ:</b>\n"
         f"<b>├ 🟢 অটো লাইভ রিপ্লেস : প্রতি মিনিটে মেসেজ স্বয়ংক্রিয়ভাবে রিফ্রেশ হবে</b>\n"
         f"<b>├ 🎯 BIG & SMALL নিখুঁত ট্রেন্ড ফিল্টারিং</b>\n"
-        f"<b>├ 🛡️ ২-লেভেল হাই একুরেসি সেফটি বুস্টার মেথড</b>\n"
-        f"<b>├ 💰 অফিসিয়াল ৭-স্টেপ রিস্ক-ফ্রি মার্টিঙ্গেল মানি ম্যানেজমেন্ট</b>\n"
+        f"<b>├ 🛡️ ২-লেভেল হাই একুরেসি সেফটি মেথড</b>\n"
+        f"<b>├ 💰 অফিসিয়াল ৭-স্টেপ মার্টিঙ্গেল ব্যাকআপ চার্ট</b>\n"
         f"<b>└ 💎 ৯৯.৮% পর্যন্ত রিয়েল-টাইম উইন রেট পারফরম্যান্স</b>\n\n"
-        f"<b>📌 ইউজার প্রোফাইল ডাটা:</b>\n"
+        f"<b>📌 ট্রেডার প্রোফাইল ডাটা:</b>\n"
         f"<b>├ 👤 ট্রেডার নাম   : {first_name}</b>\n"
         f"<b>├ 🆔 ট্রেডার আইডি : <code>{user_id}</code></b>\n"
-        f"<b>└ 🔰 ভিআইপি স্ট্যাটাস : 🟢 𝗩𝗜𝗣 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗔𝗖𝗧𝗜𝗩𝗘</b>\n\n"
-        f"<b>💡 নিচের প্রিমিয়াম বাটনগুলো চেপে আপনার প্রয়োজনীয় সার্ভিসটি এখনই শুরু করুন।</b>\n"
+        f"<b>└ 🔰 স্ট্যাটাস     : 🟢 𝗩𝗜𝗣 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗔𝗖𝗧𝗜𝗩𝗘</b>\n\n"
+        f"<b>💡 নিচের বাটনগুলো চেপে আপনার সিগন্যাল সার্ভিস এখনই শুরু করুন।</b>\n"
         f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
     )
 
@@ -258,23 +260,21 @@ def format_signal_msg(period, pred, numbers=None, level=1):
     )
 
 # ==============================================================================
-# 🎮 ৬. কন্ট্রোলার ও স্টেট ট্র্যাকার
+# 🎮 ৬. কন্ট্রোলার ও মেসেজ প্রসেসর
 # ==============================================================================
 waiting_broadcast_admin = None
 waiting_ban_admin = None
 waiting_unban_admin = None
 waiting_channel_admin = None
-admin_live_sender_mode = {}
-user_submit_state = {}
 
 def process_updates():
     global waiting_broadcast_admin, waiting_ban_admin, waiting_unban_admin, waiting_channel_admin
-    global admin_live_sender_mode, user_submit_state
+    global admin_live_sender_mode
     offset = 0
 
     while True:
         try:
-            updates = tg_api("getUpdates", {"offset": offset, "timeout": 20})
+            updates = tg_api("getUpdates", {"offset": offset, "timeout": 15})
             if updates and "result" in updates:
                 for u in updates["result"]:
                     offset = u["update_id"] + 1
@@ -290,151 +290,72 @@ def process_updates():
                         chat_id = msg_obj.get("chat", {}).get("id", user_id)
                         msg_id = msg_obj.get("message_id")
 
-                        # ইউজার সাবমিশন ফর্ম রিকোয়েস্ট
-                        if data == "usr_submit_form":
-                            answer_callback(cq_id)
-                            user_submit_state[user_id] = {"step": 1, "uid": ""}
-                            send_msg(user_id, "<b>✍️ অনুগ্রহ করে আপনার গেমের সঠিক User ID (UID) টি লিখে পাঠান:</b>")
-                            continue
+                        # বাটন ক্লিকে কোনো লোডিং যেন আটকে না থাকে তাই শুরুতেই একনলেজ করা
+                        answer_callback(cq_id)
 
-                        # যদি নন-এডমিন কোনো এডমিন বাটনে চাপ দেয়
-                        if not is_admin(user_id) and data.startswith("adm_"):
-                            answer_callback(cq_id, f"🚫 আপনার এডমিন এক্সেস নেই! (ID: {user_id})", alert=True)
-                            continue
-
-                        # এডমিন অপশনস
+                        # এডমিন বাটন প্রসেসিং
                         if is_admin(user_id):
-                            # রিফ্রেশ বা ব্যাক প্যানেল
                             if data in ["adm_refresh_panel", "adm_back_panel"]:
-                                answer_callback(cq_id, "প্যানেল রিফ্রেশ হয়েছে!")
                                 edit_msg(chat_id, msg_id, "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\nসম্পূর্ণ সিস্টেম কন্ট্রোল করতে নিচের অপশন ব্যবহার করুন।", get_admin_panel_markup(user_id))
                                 continue
 
-                            # ইউজার অ্যাপ্রুভ
-                            elif data.startswith("app_"):
-                                target_id = int(data.split("_")[1])
-                                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                                db_query("UPDATE users SET is_verified = 1, is_banned = 0, last_access_date = ? WHERE user_id = ?", (today_str, target_id), commit=True)
-                                answer_callback(cq_id, "ইউজার সফলভাবে অ্যাপ্রুভ হয়েছে!", alert=False)
-                                edit_msg(chat_id, msg_id, f"<b>✅ ইউজার <code>{target_id}</code> সফলভাবে আজকের জন্য অ্যাপ্রুভ করা হয়েছে!</b>")
-                                send_msg(
-                                    target_id,
-                                    f"<b>🎉 অভিনন্দন! আপনার UID ও ডিপোজিট এডমিন কর্তৃক সফলভাবে অনুমোদিত হয়েছে!</b>\n\n<b>এখন আপনি আজকের জন্য 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 সার্ভিসের পূর্ণ এক্সেস পেয়ে গেছেন।</b>\n\n👉 {REGISTER_LINK}",
-                                    get_main_keyboard(target_id)
-                                )
-                                continue
-
-                            # ইউজার রিজেক্ট
-                            elif data.startswith("rej_"):
-                                target_id = int(data.split("_")[1])
-                                db_query("UPDATE users SET is_verified = -1, is_banned = 1, auto_signal = 0 WHERE user_id = ?", (target_id,), commit=True)
-                                answer_callback(cq_id, "ইউজার রিজেক্ট ও ব্যান করা হয়েছে!", alert=True)
-                                edit_msg(chat_id, msg_id, f"<b>🚫 ইউজার <code>{target_id}</code> রিজেক্ট ও ব্যান করা হয়েছে।</b>")
-                                send_msg(target_id, "<b>❌ দুঃখিত! আপনার প্রদত্ত UID বা ডিপোজিট ডাটা সঠিক না থাকায় এডমিন এক্সেস রিজেক্ট করেছে।</b>")
-                                continue
-
-                            # মেইনটেনেন্স টগল
                             elif data == "adm_maint":
                                 res = db_query("SELECT maintenance FROM system_stats WHERE id = 1", fetchone=True)
                                 cur_m = res[0] if res else 0
                                 new_m = 0 if cur_m == 1 else 1
                                 db_query("UPDATE system_stats SET maintenance = ? WHERE id = 1", (new_m,), commit=True)
                                 st = "অন (ON) 🔴" if new_m == 1 else "বন্ধ (OFF) 🟢"
-                                answer_callback(cq_id, f"মেইনটেনেন্স মোড: {st}", alert=True)
                                 edit_msg(chat_id, msg_id, f"<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n🛠️ মেইনটেনেন্স মোড বর্তমানে: <b>{st}</b>", get_admin_panel_markup(user_id))
                                 continue
 
-                            # লাইভ সেন্ডার টগল
                             elif data == "adm_toggle_sender":
                                 cur_mode = admin_live_sender_mode.get(user_id, False)
                                 admin_live_sender_mode[user_id] = not cur_mode
                                 st_text = "🟢 সক্রিয় (ON)" if admin_live_sender_mode[user_id] else "🔴 নিষ্ক্রিয় (OFF)"
-                                answer_callback(cq_id, f"লাইভ সেন্ডার মোড: {st_text}", alert=True)
                                 edit_msg(chat_id, msg_id, f"<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ লাইভ সিগন্যাল সেন্ডার বর্তমানে: <b>{st_text}</b>\n\n<i>ইনবক্সে <code>BIG</code>, <code>SMALL</code> অথবা <code>BIG 5 8</code> লিখলে সরাসরি চ্যানেলে পোস্ট হবে।</i>", get_admin_panel_markup(user_id))
                                 continue
 
-                            # চ্যানেল কানেক্ট
                             elif data == "adm_connect_channel":
-                                answer_callback(cq_id)
                                 waiting_channel_admin = user_id
                                 send_msg(user_id, "<b>✍️ যে চ্যানেল বা গ্রুপে সিগন্যাল পাঠাতে চান তার ID (যেমন: -100xxxxxxxxxx) অথবা পাবলিক Username (যেমন: @channelname) লিখে পাঠান:</b>")
                                 continue
 
-                            # ইউজার ডাটা অ্যানালিটিক্স
                             elif data == "adm_users":
-                                answer_callback(cq_id)
-                                today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                                users = db_query("SELECT user_id, is_banned, auto_signal, is_verified, last_access_date FROM users", fetchall=True) or []
+                                users = db_query("SELECT user_id, is_banned, auto_signal FROM users", fetchall=True) or []
                                 tot = len(users)
                                 aut = sum(1 for x in users if x[2] == 1)
                                 ban = sum(1 for x in users if x[1] == 1)
-                                verified = sum(1 for x in users if x[3] == 1 and x[4] == today_str)
-                                pending = sum(1 for x in users if x[3] == 0)
                                 send_msg(
                                     user_id,
                                     f"<b>📊 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 ইউজার অ্যানালিটিক্স:</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━</b>\n"
                                     f"<b>👥 মোট ইউজার             : <code>{tot}</code> জন</b>\n"
-                                    f"<b>🟢 আজকের ভেরিফাইড ইউজার : <code>{verified}</code> জন</b>\n"
-                                    f"<b>⏳ পেন্ডিং সাবমিশন        : <code>{pending}</code> জন</b>\n"
                                     f"<b>⚡ লাইভ অটো সিগন্যাল ইউজার: <code>{aut}</code> জন</b>\n"
                                     f"<b>🚫 ব্যানড ইউজার            : <code>{ban}</code> জন</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━</b>"
                                 )
                                 continue
 
-                            # পেন্ডিং রিকোয়েস্ট তালিকা
-                            elif data == "adm_pending":
-                                pendings = db_query("SELECT user_id, first_name, username, game_uid, deposit_amount FROM users WHERE is_verified = 0 AND deposit_amount != ''", fetchall=True) or []
-                                if not pendings:
-                                    answer_callback(cq_id, "কোনো পেন্ডিং রিকোয়েস্ট নেই।", alert=True)
-                                else:
-                                    answer_callback(cq_id)
-                                    send_msg(user_id, f"<b>⏳ মোট পেন্ডিং রিকোয়েস্ট আছে: {len(pendings)} জন</b>")
-                                    for p in pendings[:5]:
-                                        p_kb = {
-                                            "inline_keyboard": [
-                                                [
-                                                    {"text": "✅ Approve", "callback_data": f"app_{p[0]}"},
-                                                    {"text": "🚫 Reject", "callback_data": f"rej_{p[0]}"}
-                                                ]
-                                            ]
-                                        }
-                                        send_msg(
-                                            user_id,
-                                            f"<b>👤 নাম            : {p[1]}\n🆔 টেলিগ্রাম আইডি: <code>{p[0]}</code>\n🔗 ইউজারনেম     : @{p[2]}\n🎮 গেম UID       : <code>{p[3]}</code>\n💰 ডিপোজিট       : <code>{p[4]} BDT</code></b>",
-                                            p_kb
-                                        )
-                                continue
-
-                            # ব্রডকাস্ট রিকোয়েস্ট
                             elif data == "adm_bc":
-                                answer_callback(cq_id)
                                 waiting_broadcast_admin = user_id
-                                send_msg(user_id, "<b>✍️ ব্রডকাস্ট মেসেজটি পাঠান (ছবি, ভিডিও, ফাইল, স্টিকার বা যেকোনো টেক্সট):</b>\n\nবাতিল করতে <code>/cancel</code> লিখুন।")
+                                send_msg(user_id, "<b>✍️ ব্রডকাস্ট মেসেজটি পাঠান (ছবি, ভিডিও, ফাইল, স্টিকার বা টেক্সট):</b>\n\nবাতিল করতে <code>/cancel</code> লিখুন।")
                                 continue
 
-                            # ব্যান ইউজার
                             elif data == "adm_ban_user":
-                                answer_callback(cq_id)
                                 waiting_ban_admin = user_id
                                 send_msg(user_id, "<b>✍️ যাকে ব্যান করতে চান তার Telegram User ID লিখে পাঠান:</b>")
                                 continue
 
-                            # আনব্যান ইউজার
                             elif data == "adm_unban_user":
-                                answer_callback(cq_id)
                                 waiting_unban_admin = user_id
                                 send_msg(user_id, "<b>✍️ যাকে আনব্যান করতে চান তার Telegram User ID লিখে পাঠান:</b>")
                                 continue
 
-                            # ডাটাবেজ অপটিমাইজ
                             elif data == "adm_clean_db":
                                 db_query("VACUUM", commit=True)
-                                answer_callback(cq_id, "ডাটাবেজ অপটিমাইজেশন সম্পন্ন হয়েছে!", alert=True)
+                                send_msg(user_id, "<b>✅ ডাটাবেজ অপটিমাইজেশন সফলভাবে সম্পন্ন হয়েছে!</b>")
                                 continue
-
-                        # ডিফল্ট ফলব্যাক
-                        answer_callback(cq_id)
-                        continue
+                        else:
+                            send_msg(user_id, "<b>🚫 আপনার এই অ্যাকশনে প্রবেশের অনুমতি নেই।</b>")
+                            continue
 
                     # ----------------- ২. MESSAGE HANDLING (মেসেজ হ্যান্ডলার) -----------------
                     if "message" in u:
@@ -446,22 +367,20 @@ def process_updates():
                         first_name = msg.get("from", {}).get("first_name", "VIP Trader")
                         username = msg.get("from", {}).get("username", "None")
 
-                        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                        default_ver = 1 if is_admin(chat_id) else 0
-
+                        # ইউজার রেজিস্টার
                         db_query("""
-                            INSERT OR IGNORE INTO users (user_id, username, first_name, is_verified, last_access_date, joined_at)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, (chat_id, username, first_name, default_ver, today_str if default_ver == 1 else '', time.strftime("%Y-%m-%d %H:%M:%S")), commit=True)
+                            INSERT OR IGNORE INTO users (user_id, username, first_name, joined_at)
+                            VALUES (?, ?, ?, ?)
+                        """, (chat_id, username, first_name, time.strftime("%Y-%m-%d %H:%M:%S")), commit=True)
 
-                        usr = db_query("SELECT is_banned, auto_signal, last_msg_id, is_verified, last_access_date, game_uid, deposit_amount FROM users WHERE user_id = ?", (chat_id,), fetchone=True)
+                        usr = db_query("SELECT is_banned, auto_signal, last_msg_id FROM users WHERE user_id = ?", (chat_id,), fetchone=True)
 
                         # ব্যান চেক
                         if usr and usr[0] == 1 and not is_admin(chat_id):
-                            send_msg(chat_id, "<b>🚫 আপনার অ্যাকাউন্টটি ব্যান করা হয়েছে। সহায়তার জন্য সাপোর্টে যোগাযোগ করুন।</b>")
+                            send_msg(chat_id, "<b>🚫 আপনার অ্যাকাউন্টটি ব্যান রয়েছে। সহায়তার জন্য সাপোর্টে যোগাযোগ করুন।</b>")
                             continue
 
-                        # ব্রডকাস্ট এক্সিকিউটর
+                        # ব্রডকাস্ট হ্যান্ডলার
                         if is_admin(chat_id) and waiting_broadcast_admin == chat_id:
                             if text != "/cancel":
                                 waiting_broadcast_admin = None
@@ -488,7 +407,7 @@ def process_updates():
                                 send_msg(chat_id, "<b>🚫 ব্রডকাস্ট বাতিল করা হয়েছে।</b>")
                                 continue
 
-                        # এডমিনের লাইভ সিগন্যাল সরাসরি চ্যানেলে পোস্ট
+                        # এডমিনের সরাসরি চ্যানেলে সিগন্যাল পোস্ট
                         if is_admin(chat_id) and admin_live_sender_mode.get(chat_id, False) and text:
                             parts = text.split()
                             cmd_word = parts[0].upper()
@@ -533,73 +452,10 @@ def process_updates():
                                 waiting_unban_admin = None
                                 try:
                                     t_id = int(text)
-                                    db_query("UPDATE users SET is_banned = 0, is_verified = 1, last_access_date = ? WHERE user_id = ?", (today_str, t_id), commit=True)
-                                    send_msg(chat_id, f"<b>✅ ইউজার <code>{t_id}</code> আনব্যান ও আজকের জন্য ভেরিফাই করা হয়েছে।</b>")
+                                    db_query("UPDATE users SET is_banned = 0 WHERE user_id = ?", (t_id,), commit=True)
+                                    send_msg(chat_id, f"<b>✅ ইউজার <code>{t_id}</code> সফলভাবে আনব্যান করা হয়েছে।</b>")
                                 except ValueError:
                                     send_msg(chat_id, "<b>❌ সঠিক নিউমেরিক ইউজার আইডি দিন!</b>")
-                                continue
-
-                        # ইউজার UID ও ডিপোজিট সাবমিশন প্রসেসিং
-                        if chat_id in user_submit_state and text:
-                            st = user_submit_state[chat_id]
-                            if st["step"] == 1:
-                                user_submit_state[chat_id]["uid"] = text
-                                user_submit_state[chat_id]["step"] = 2
-                                send_msg(chat_id, f"<b>✅ UID সংরক্ষিত: <code>{text}</code>\n\n💰 এবার আজকের ডিপোজিট অ্যামাউন্ট (BDT) লিখে পাঠান:</b>")
-                                continue
-                            elif st["step"] == 2:
-                                uid_val = st["uid"]
-                                dep_val = text
-                                del user_submit_state[chat_id]
-                                
-                                db_query("UPDATE users SET game_uid = ?, deposit_amount = ?, is_verified = 0 WHERE user_id = ?", (uid_val, dep_val, chat_id), commit=True)
-                                
-                                send_msg(
-                                    chat_id,
-                                    f"<b>✅ আপনার তথ্য সফলভাবে এডমিনের কাছে জমা হয়েছে!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"🎮 <b>গেম UID    :</b> <code>{uid_val}</code>\n"
-                                    f"💰 <b>ডিপোজিট   :</b> <code>{dep_val} BDT</code>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"<i>এডমিন দ্রুত ভেরিফাই করে এক্সেস চালু করবেন। অনুগ্রহ করে অপেক্ষা করুন।</i>"
-                                )
-                                
-                                req_kb = {
-                                    "inline_keyboard": [
-                                        [
-                                            {"text": "✅ Approve", "callback_data": f"app_{chat_id}"},
-                                            {"text": "🚫 Reject", "callback_data": f"rej_{chat_id}"}
-                                        ]
-                                    ]
-                                }
-                                for adm in ADMIN_IDS:
-                                    send_msg(
-                                        adm,
-                                        f"<b>🔔 নতুন সাবমিশন এসেছে!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"👤 <b>নাম            :</b> {first_name}\n"
-                                        f"🆔 <b>টেলিগ্রাম আইডি:</b> <code>{chat_id}</code>\n"
-                                        f"🔗 <b>ইউজারনেম     :</b> @{username}\n"
-                                        f"🎮 <b>গেম UID       :</b> <code>{uid_val}</code>\n"
-                                        f"💰 <b>ডিপোজিট       :</b> <code>{dep_val} BDT</code>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"অনুমোদন দিতে চান?",
-                                        req_kb
-                                    )
-                                continue
-
-                        # সাধারণ ইউজারদের দৈনিক ভেরিফিকেশন চেক
-                        if not is_admin(chat_id):
-                            if not usr or usr[3] != 1 or usr[4] != today_str:
-                                sub_kb = {
-                                    "inline_keyboard": [
-                                        [{"text": "📝 সাবমিট করুন (UID ও ডিপোজিট)", "callback_data": "usr_submit_form"}]
-                                    ]
-                                }
-                                send_msg(
-                                    chat_id,
-                                    f"<b>🔒 দৈনিক এক্সেস ভেরিফিকেশন প্রয়োজন!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"<b>প্রিয় {first_name},</b> আজকের ভিআইপি সিগন্যাল সার্ভার এক্সেস করতে আপনার গেম <b>UID</b> এবং <b>ডিপোজিট অ্যামাউন্ট</b> সাবমিট করুন।\n\n"
-                                    f"<i>(প্রতিদিন রাত ১২:০০ টার পর নতুন দিনের জন্য এক্সেস আপডেট করতে হয়)</i>\n\n"
-                                    f"👉 <b>নিচের বাটনে ক্লিক করে তথ্য সাবমিট করুন:</b>",
-                                    sub_kb
-                                )
                                 continue
 
                         # মেইনটেনেন্স চেক
@@ -609,7 +465,7 @@ def process_updates():
                             send_msg(chat_id, "<b>🛠️ সার্ভারে মেইনটেনেন্স ও আপগ্রেডেশনের কাজ চলছে! অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।</b>")
                             continue
 
-                        # মেনু অপশন কমান্ডস
+                        # মেনু অপশনসমূহ
                         if text == "/start":
                             send_msg(chat_id, get_welcome_message(first_name, chat_id), get_main_keyboard(chat_id))
 
@@ -692,7 +548,7 @@ def process_updates():
                             send_msg(
                                 chat_id,
                                 f"<b>💬 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 অফিসিয়াল সাপোর্ট ও হেল্পডেস্ক</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-                                f"<b>যেকোনো প্রশ্ন, ব্যালেন্স ইস্যু বা অ্যাকাউন্ট ভেরিফিকেশনের জন্য সরাসরি যোগাযোগ করুন:</b>\n\n"
+                                f"<b>যেকোনো প্রশ্ন বা ব্যালেন্স সংক্রান্ত বিষয়ে সরাসরি যোগাযোগ করুন:</b>\n\n"
                                 f"<b>👑 সাপোর্ট ইনবক্স : @{SUPPORT_USERNAME}</b>\n"
                                 f"<b>⏰ একটিভ টাইম    : 24/7 অনলাইন ইনস্ট্যান্ট রেসপন্স</b>\n"
                                 f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
@@ -704,24 +560,14 @@ def process_updates():
             time.sleep(1)
 
 # ==============================================================================
-# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল ও মিডনাইট রিসেট ক্রন
+# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল অটো ক্রন লুপ
 # ==============================================================================
 def live_auto_signal_loop():
     logging.info("⚡ 1-Minute Live Signal Loop Started...")
     current_period = get_exact_game_period()
-    today_check = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     while True:
         try:
-            current_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            
-            # রাত ১২:০০ টার অটো রিসেট (Midnight Reset)
-            if current_day != today_check:
-                today_check = current_day
-                adm_ids_str = ",".join(str(int(x)) for x in ADMIN_IDS)
-                db_query(f"UPDATE users SET is_verified = 0, auto_signal = 0 WHERE user_id NOT IN ({adm_ids_str})", commit=True)
-                logging.info(f"🌙 Midnight reset completed for date: {current_day}")
-
             new_period = get_exact_game_period()
 
             if new_period != current_period:
@@ -731,7 +577,7 @@ def live_auto_signal_loop():
                 lvl = random.choice([1, 2])
                 sig_msg = format_signal_msg(current_period, pred, nums, lvl)
 
-                active_users = db_query("SELECT user_id, last_msg_id FROM users WHERE auto_signal = 1 AND is_banned = 0 AND is_verified = 1 AND last_access_date = ?", (current_day,), fetchall=True) or []
+                active_users = db_query("SELECT user_id, last_msg_id FROM users WHERE auto_signal = 1 AND is_banned = 0", fetchall=True) or []
 
                 for u in active_users:
                     uid, old_mid = u[0], u[1]
