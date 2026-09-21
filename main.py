@@ -1,4 +1,5 @@
 import os
+import re
 import ssl
 import json
 import time
@@ -12,7 +13,7 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==============================================================================
-# ⚙️ ১. কনফিগারেশন সেটিংস (২ জন এডমিন)
+# ⚙️ ১. কনফিগারেশন সেটিংস
 # ==============================================================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8865815253:AAHhWKutyrgH0XxfFUgFlvIp0HVBnBjdHdM")
 ADMIN_IDS = [6753121703, 7122259829]
@@ -129,7 +130,7 @@ def update_single_icon(key, val):
     db_query("UPDATE system_stats SET icons_json = ? WHERE id = 1", (json.dumps(icons, ensure_ascii=False),), commit=True)
 
 # ==============================================================================
-# 📡 ৩. TELEGRAM API
+# 📡 ৩. TELEGRAM API (WITH FAIL-SAFE HTML & CUSTOM EMOJI PARSER)
 # ==============================================================================
 def tg_api(method, payload=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -139,6 +140,12 @@ def tg_api(method, payload=None):
         req = urllib.request.Request(url, data=data, headers=headers)
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as res:
             return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_res = e.read().decode("utf-8")
+        try:
+            return json.loads(err_res)
+        except Exception:
+            return {"ok": False, "description": err_res}
     except Exception as e:
         logging.error(f"Telegram API Error: {e}")
         return None
@@ -147,7 +154,18 @@ def send_msg(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    return tg_api("sendMessage", payload)
+    res = tg_api("sendMessage", payload)
+    
+    # কাস্টম প্রিমিয়াম ইমোজির ট্যাগ কোনো চ্যাটে সাপোর্ট না করলে ক্লিন টেক্সটে সেন্ড করবে
+    if not res or not res.get("ok", False):
+        clean_text = re.sub(r'<tg-emoji id="[^"]*">(.*?)</tg-emoji>', r'\1', text)
+        payload["text"] = clean_text
+        res = tg_api("sendMessage", payload)
+        if not res or not res.get("ok", False):
+            payload.pop("parse_mode", None)
+            payload["text"] = re.sub(r'<[^>]+>', '', text)
+            res = tg_api("sendMessage", payload)
+    return res
 
 def copy_msg(chat_id, from_chat_id, message_id, caption=None, reply_markup=None):
     payload = {"chat_id": chat_id, "from_chat_id": from_chat_id, "message_id": message_id}
@@ -172,16 +190,17 @@ def edit_msg(chat_id, msg_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "message_id": msg_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    return tg_api("editMessageText", payload)
+    res = tg_api("editMessageText", payload)
+    if not res or not res.get("ok", False):
+        clean_text = re.sub(r'<tg-emoji id="[^"]*">(.*?)</tg-emoji>', r'\1', text)
+        payload["text"] = clean_text
+        res = tg_api("editMessageText", payload)
+    return res
 
 # ==============================================================================
-# 🔥 ৪. ১০০% পারফেক্ট টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি এক্সট্রাক্টর (Piece-by-Piece Safe)
+# 🔥 ৪. ১০০% নির্ভুল প্রিমিয়াম ও নরমাল ইমোজি এক্সট্রাক্টর
 # ==============================================================================
-def extract_custom_emoji_or_text(message_obj):
-    """
-    মেসেজ বা ক্যাপশন থেকে প্রিমিয়াম কাস্টম ইমোজিগুলোকে ১০০% সঠিক
-    <tg-emoji id="ID">EMOJI</tg-emoji> ফরম্যাটে কনভার্ট করে ডাটাবেজে সংরক্ষণ উপযোগী করে।
-    """
+def extract_emoji_perfect(message_obj):
     text = message_obj.get("text", "") or message_obj.get("caption", "")
     entities = message_obj.get("entities", []) or message_obj.get("caption_entities", [])
     
@@ -192,7 +211,6 @@ def extract_custom_emoji_or_text(message_obj):
     if not custom_ents:
         return text.strip()
 
-    # টেলিগ্রাম UTF-16 Code-Units অফসেট নির্ভুলভাবে পার্সিং
     utf16_bytes = text.encode("utf-16-le")
     pieces = []
     last_idx = 0
@@ -204,20 +222,18 @@ def extract_custom_emoji_or_text(message_obj):
         length = ent.get("length", 1)
         cid = ent.get("custom_emoji_id")
         
-        # ইমোজির আগের সাধারণ টেক্সট অংশ
         if offset > last_idx:
             chunk = utf16_bytes[last_idx * 2 : offset * 2].decode("utf-16-le", errors="ignore")
             pieces.append(chunk)
             
-        # কাস্টম ইমোজির ফলব্যাক ক্যারেক্টার
         emoji_char = utf16_bytes[offset * 2 : (offset + length) * 2].decode("utf-16-le", errors="ignore")
         if not emoji_char.strip():
             emoji_char = "💎"
             
+        # প্রিমিয়াম ইমোজি ট্যাগ তৈরি
         pieces.append(f'<tg-emoji id="{cid}">{emoji_char}</tg-emoji>')
         last_idx = offset + length
 
-    # অবশিষ্ট অংশ
     if last_idx * 2 < len(utf16_bytes):
         pieces.append(utf16_bytes[last_idx * 2:].decode("utf-16-le", errors="ignore"))
 
@@ -334,7 +350,7 @@ def format_signal_msg(period, pred, numbers=None, level=1):
     )
 
 # ==============================================================================
-# 🎮 ৭. কন্ট্রোলার ও স্টেট ট্র্যাকার
+# 🎮 ৭. কন্ট্রোলার ও প্রসেসিং
 # ==============================================================================
 waiting_broadcast_admin = None
 waiting_ban_admin = None
@@ -392,7 +408,7 @@ def process_updates():
                                 ic = get_all_icons()
                                 cur_val = ic.get(target_key, "")
                                 answer_callback(cq_id)
-                                send_msg(user_id, f"<b>✍️ পরিবর্তন অপশন: {lbl}</b>\n\nবর্তমান অ্যাক্টিভ মান: {cur_val}\n\n👉 <b>আপনার কিবোর্ড থেকে সাধারণ ইমোজি অথবা যেকোনো টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি সেন্ড করুন:</b>")
+                                send_msg(user_id, f"<b>✍️ পরিবর্তন অপশন: {lbl}</b>\n\nবর্তমান অ্যাক্টিভ মান: {cur_val}\n\n👉 <b>আপনার কিবোর্ড থেকে যেকোনো প্রিমিয়াম কাস্টম ইমোজি অথবা সাধারণ ইমোজি সেন্ড করুন:</b>")
 
                             elif data == "adm_back_panel":
                                 cur_st = "🟢 চালু" if admin_live_sender_mode.get(user_id, False) else "🔴 বন্ধ"
@@ -532,21 +548,21 @@ def process_updates():
                             send_msg(chat_id, "<b>🚫 আপনার অ্যাকাউন্টটি ব্যান রয়েছে। সাহায্যের জন্য সাপোর্টে যোগাযোগ করুন।</b>")
                             continue
 
-                        # 🔥 ১. ১০০% প্রিমিয়াম ও নরমাল ইমোজি রিয়েল-টাইম সেভার 🔥
+                        # 🔥 ১. ১০০% প্রিমিয়াম ও নরমাল ইমোজি সেভ হ্যান্ডলার 🔥
                         if chat_id in ADMIN_IDS and chat_id in waiting_icon_change:
                             target_key = waiting_icon_change[chat_id]
                             del waiting_icon_change[chat_id]
                             
-                            new_icon_val = extract_custom_emoji_or_text(msg)
+                            new_icon_val = extract_emoji_perfect(msg)
                             update_single_icon(target_key, new_icon_val)
                             lbl = ICON_LABELS.get(target_key, target_key)
                             
                             send_msg(
                                 chat_id, 
-                                f"<b>✅ প্রিমিয়াম ইমোজি/লোগো ১০০% সফলভাবে সেভ হয়েছে!</b>\n\n"
+                                f"<b>✅ প্রিমিয়াম ইমোজি/লোগো ১০০% সফলভাবে সংরক্ষিত হয়েছে!</b>\n\n"
                                 f"📌 <b>বিষয়:</b> {lbl}\n"
                                 f"✨ <b>অ্যাক্টিভ প্রিভিউ:</b> {new_icon_val}\n\n"
-                                f"<i>এখন থেকে ইউজারদের সকল সিগন্যালে এটি অটোমেটিক শো করবে।</i>"
+                                f"<i>এখন থেকে ইউজারদের সকল সিগন্যালে এটি নিখুঁতভাবে প্রদর্শিত হবে।</i>"
                             )
                             continue
 
@@ -568,7 +584,7 @@ def process_updates():
                                 target_uid = row[0]
                                 try:
                                     res = copy_msg(target_uid, chat_id, msg_id)
-                                    if res and "result" in res:
+                                    if res and res.get("ok", False):
                                         success_count += 1
                                     time.sleep(0.04)
                                 except Exception:
@@ -774,8 +790,8 @@ def process_updates():
                             radar_txt = (
                                 "<b>📡 𝗠𝗔𝗥𝗞𝗘𝗧 𝗧𝗥𝗘𝗡𝗗 𝗥𝗔𝗗𝗔𝗥</b>\n"
                                 "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-                                "<b>🎯 𝗕𝗜𝗚 𝗧𝗿𝗲𝗻𝗱        : <code>50%</code></b>\n"
-                                "<b>🎯 𝗦𝗠𝗔𝗟𝗟 𝗧𝗿𝗲𝗻𝗱      : <code>50%</code></b>\n"
+                                "<b>🎯 𝗕𝗜𝗚 𝗧𝗿𝗲𝗻ড        : <code>50%</code></b>\n"
+                                "<b>🎯 𝗦𝗠𝗔𝗟𝗟 𝗧𝗿𝗲𝗻ড      : <code>50%</code></b>\n"
                                 "<b>🔥 মার্কেট মোড        : <code>ZIG-ZAG ALTERNATING (BALANCED)</code></b>\n"
                                 "<b>🛡️ রিস্ক লেভেল       : <code>LOW RISK (STABLE)</code></b>\n"
                                 "<b>📊 অ্যালগরিদম        : <code>AI 99.2% ACCURACY</code></b>\n"
