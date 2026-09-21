@@ -1,4 +1,3 @@
-
 import os
 import ssl
 import json
@@ -13,12 +12,12 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==============================================================================
-# ⚙️ ১. কনফিগারেশন সেটিংস
+# ⚙️ ১. কনফিগারেশন সেটিংস (আপনার এডমিন আইডিগুলো)
 # ==============================================================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8968313328:AAGZSQ0BzAfj_AaIJTq3wtWbrjsCAct8Sps")
 ADMIN_IDS = [6753121703, 7122259829]
 
-# এনভায়রনমেন্টে কোনো অতিরিক্ত এডমিন থাকলে যুক্ত করা
+# এনভায়রনমেন্ট থেকে অতিরিক্ত এডমিন থাকলে যুক্ত করা
 env_adm = os.environ.get("ADMIN_IDS", "")
 if env_adm:
     for a in env_adm.split(","):
@@ -97,7 +96,7 @@ def is_admin(user_id):
         return False
 
 # ==============================================================================
-# 📡 ৩. TELEGRAM API (ফিক্সড ও হাই-স্পিড)
+# 📡 ৩. TELEGRAM API (ওয়েবহুক মুক্ত ও হাই-স্পিড)
 # ==============================================================================
 def tg_api(method, payload=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
@@ -105,11 +104,11 @@ def tg_api(method, payload=None):
         data = json.dumps(payload).encode("utf-8") if payload else None
         headers = {"Content-Type": "application/json"}
         req = urllib.request.Request(url, data=data, headers=headers)
-        # লং পোলিংয়ের জন্য ৩০ সেকেন্ড টাইমআউট
-        with urllib.request.urlopen(req, context=SSL_CTX, timeout=30) as res:
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=35) as res:
             return json.loads(res.read().decode("utf-8"))
     except Exception as e:
-        if "timed out" not in str(e).lower():
+        err_msg = str(e).lower()
+        if "timed out" not in err_msg:
             logging.error(f"TG API Error ({method}): {e}")
         return None
 
@@ -153,7 +152,6 @@ def edit_msg(chat_id, msg_id, text, reply_markup=None):
         payload["reply_markup"] = reply_markup
     res = tg_api("editMessageText", payload)
     if not res:
-        # কোনো কারণে এডিট না হলে নতুন মেসেজ পাঠিয়ে দেওয়া
         return send_msg(chat_id, text, reply_markup)
     return res
 
@@ -183,7 +181,7 @@ class QuantumRandomEngine:
 engine = QuantumRandomEngine()
 
 # ==============================================================================
-# 🎨 ৫. কীবোর্ড ও সিগন্যাল টেমপ্লেট
+# 🎨 ৫. কীবোর্ড ও সিগন্যাল ফরম্যাট
 # ==============================================================================
 BTN_START = "⚡ 𝗦𝗧𝗔𝗥𝗧 𝗔𝗨𝗧𝗢 𝗦𝗜𝗚𝗡𝗔𝗟 ⚡"
 BTN_STOP = "🛑 𝗦𝗧𝗢𝗣 𝗦𝗜𝗚𝗡𝗔𝗟 🛑"
@@ -199,11 +197,11 @@ def get_admin_panel_markup(user_id):
     cur_st = "🟢 চালু" if admin_live_sender_mode.get(int(user_id), False) else "🔴 বন্ধ"
     return {
         "inline_keyboard": [
-            [{"text": f"⚡ লাইভ সিগন্যাল মোড ({cur_st})", "callback_data": "adm_toggle_sender"}],
+            [{"text": f"⚡ লাইভ সিগন্যাল সেন্ডার ({cur_st})", "callback_data": "adm_toggle_sender"}],
             [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
             [{"text": "📢 চ্যানেল কানেক্ট", "callback_data": "adm_connect_channel"}, {"text": "🛠️ মেইনটেনেন্স", "callback_data": "adm_maint"}],
             [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}],
-            [{"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}, {"text": "🔄 প্যানেল রিফ্রেশ", "callback_data": "adm_refresh_panel"}]
+            [{"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}, {"text": "🔄 রিফ্রেশ প্যানেল", "callback_data": "adm_refresh_panel"}]
         ]
     }
 
@@ -223,16 +221,16 @@ def get_welcome_message(first_name, user_id):
         f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
         f"<b>🌟 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 𝗦𝗘𝗥𝗩𝗘𝗥 𝗩𝟮𝟬-এ আপনাকে স্বাগতম!</b>\n\n"
         f"<b>🚀 এটি বিশ্বের অন্যতম শক্তিশালী AI চালিত ১-মিনিট ডাইনামিক উইংগো প্রেডিকশন সিস্টেম।</b>\n\n"
-        f"<b>🎯 আমাদের বিশেষ সুবিধাসমূহ:</b>\n"
-        f"<b>├ 🟢 অটো লাইভ রিপ্লেস : প্রতি মিনিটে মেসেজ স্বয়ংক্রিয়ভাবে রিফ্রেশ হবে</b>\n"
+        f"<b>🎯 আমাদের সুবিধাসমূহ:</b>\n"
+        f"<b>├ 🟢 অটো লাইভ রিপ্লেস : প্রতি মিনিটে সিগন্যাল স্বয়ংক্রিয়ভাবে আপডেট হবে</b>\n"
         f"<b>├ 🎯 BIG & SMALL নিখুঁত ট্রেন্ড ফিল্টারিং</b>\n"
-        f"<b>├ 🛡️ ২-লেভেল হাই একুরেসি সেফটি মেথড</b>\n"
+        f"<b>├ 🛡️ ২-লেভেল হাই একুরেসি সেফটি বুস্টার মেথড</b>\n"
         f"<b>├ 💰 অফিসিয়াল ৭-স্টেপ মার্টিঙ্গেল ব্যাকআপ চার্ট</b>\n"
         f"<b>└ 💎 ৯৯.৮% পর্যন্ত রিয়েল-টাইম উইন রেট পারফরম্যান্স</b>\n\n"
-        f"<b>📌 ট্রেডার প্রোফাইল ডাটা:</b>\n"
-        f"<b>├ 👤 ট্রেডার নাম   : {first_name}</b>\n"
-        f"<b>├ 🆔 ট্রেডার আইডি : <code>{user_id}</code></b>\n"
-        f"<b>└ 🔰 স্ট্যাটাস     : 🟢 𝗩𝗜𝗣 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗔𝗖𝗧𝗜𝗩𝗘</b>\n\n"
+        f"<b>📌 প্রোফাইল ডাটা:</b>\n"
+        f"<b>├ 👤 নাম       : {first_name}</b>\n"
+        f"<b>├ 🆔 ট্রেডার আইডি: <code>{user_id}</code></b>\n"
+        f"<b>└ 🔰 স্ট্যাটাস   : 🟢 𝗩𝗜𝗣 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗔𝗖𝗧𝗜𝗩𝗘</b>\n\n"
         f"<b>💡 নিচের বাটনগুলো চেপে আপনার সিগন্যাল সার্ভিস এখনই শুরু করুন।</b>\n"
         f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
     )
@@ -260,7 +258,7 @@ def format_signal_msg(period, pred, numbers=None, level=1):
     )
 
 # ==============================================================================
-# 🎮 ৬. কন্ট্রোলার ও মেসেজ প্রসেসর
+# 🎮 ৬. কন্ট্রোলার ও পোলিং হ্যান্ডলার
 # ==============================================================================
 waiting_broadcast_admin = None
 waiting_ban_admin = None
@@ -272,14 +270,16 @@ def process_updates():
     global admin_live_sender_mode
     offset = 0
 
+    logging.info("🚀 Long-Polling System Active & Listening for Updates...")
+
     while True:
         try:
-            updates = tg_api("getUpdates", {"offset": offset, "timeout": 15})
+            updates = tg_api("getUpdates", {"offset": offset, "timeout": 10})
             if updates and "result" in updates:
                 for u in updates["result"]:
                     offset = u["update_id"] + 1
 
-                    # ----------------- ১. CALLBACK QUERY (ইনলাইন বাটন) -----------------
+                    # ----------------- ১. CALLBACK QUERY (ইনলাইন বাটন ক্লিক) -----------------
                     if "callback_query" in u:
                         cq = u["callback_query"]
                         cq_id = cq["id"]
@@ -290,10 +290,11 @@ def process_updates():
                         chat_id = msg_obj.get("chat", {}).get("id", user_id)
                         msg_id = msg_obj.get("message_id")
 
-                        # বাটন ক্লিকে কোনো লোডিং যেন আটকে না থাকে তাই শুরুতেই একনলেজ করা
+                        # সাথে সাথে অ্যান্সার দিয়ে টেলিগ্রামের লোডিং বন্ধ করা
                         answer_callback(cq_id)
+                        logging.info(f"🔘 Button Clicked by [{user_id}]: {data}")
 
-                        # এডমিন বাটন প্রসেসিং
+                        # এডমিন অপশনস হ্যান্ডলিং
                         if is_admin(user_id):
                             if data in ["adm_refresh_panel", "adm_back_panel"]:
                                 edit_msg(chat_id, msg_id, "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\nসম্পূর্ণ সিস্টেম কন্ট্রোল করতে নিচের অপশন ব্যবহার করুন।", get_admin_panel_markup(user_id))
@@ -354,10 +355,10 @@ def process_updates():
                                 send_msg(user_id, "<b>✅ ডাটাবেজ অপটিমাইজেশন সফলভাবে সম্পন্ন হয়েছে!</b>")
                                 continue
                         else:
-                            send_msg(user_id, "<b>🚫 আপনার এই অ্যাকশনে প্রবেশের অনুমতি নেই।</b>")
+                            send_msg(user_id, f"<b>🚫 আপনার এই অপশন ব্যবহারের অনুমতি নেই। (আপনার ID: <code>{user_id}</code>)</b>")
                             continue
 
-                    # ----------------- ২. MESSAGE HANDLING (মেসেজ হ্যান্ডলার) -----------------
+                    # ----------------- ২. MESSAGE HANDLING (টেক্সট মেসেজ) -----------------
                     if "message" in u:
                         msg = u["message"]
                         chat_id = msg["chat"]["id"]
@@ -367,7 +368,6 @@ def process_updates():
                         first_name = msg.get("from", {}).get("first_name", "VIP Trader")
                         username = msg.get("from", {}).get("username", "None")
 
-                        # ইউজার রেজিস্টার
                         db_query("""
                             INSERT OR IGNORE INTO users (user_id, username, first_name, joined_at)
                             VALUES (?, ?, ?, ?)
@@ -407,7 +407,7 @@ def process_updates():
                                 send_msg(chat_id, "<b>🚫 ব্রডকাস্ট বাতিল করা হয়েছে।</b>")
                                 continue
 
-                        # এডমিনের সরাসরি চ্যানেলে সিগন্যাল পোস্ট
+                        # সরাসরি চ্যানেলে সিগন্যাল পোস্ট
                         if is_admin(chat_id) and admin_live_sender_mode.get(chat_id, False) and text:
                             parts = text.split()
                             cmd_word = parts[0].upper()
@@ -430,7 +430,7 @@ def process_updates():
                                 else:
                                     send_msg(chat_id, "<b>⚠️ কোনো চ্যানেল কানেক্ট করা নেই! এডমিন প্যানেল থেকে চ্যানেল যুক্ত করুন।</b>")
 
-                        # এডমিন টেক্সট ইনপুট
+                        # এডমিন ইনপুটস
                         if is_admin(chat_id):
                             if waiting_channel_admin == chat_id and not text.startswith("/"):
                                 waiting_channel_admin = None
@@ -465,7 +465,7 @@ def process_updates():
                             send_msg(chat_id, "<b>🛠️ সার্ভারে মেইনটেনেন্স ও আপগ্রেডেশনের কাজ চলছে! অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।</b>")
                             continue
 
-                        # মেনু অপশনসমূহ
+                        # বাটন কমান্ড হ্যান্ডলিং
                         if text == "/start":
                             send_msg(chat_id, get_welcome_message(first_name, chat_id), get_main_keyboard(chat_id))
 
@@ -560,7 +560,7 @@ def process_updates():
             time.sleep(1)
 
 # ==============================================================================
-# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল অটো ক্রন লুপ
+# 🔄 ৭. ১-মিনিট লাইভ সিগন্যাল অটো রিপ্লেস ক্রন
 # ==============================================================================
 def live_auto_signal_loop():
     logging.info("⚡ 1-Minute Live Signal Loop Started...")
@@ -594,7 +594,7 @@ def live_auto_signal_loop():
         time.sleep(1)
 
 # ==============================================================================
-# 🌐 ৮. হেলথ চেক ওয়েব সার্ভার (২৪/৭ আপটাইমের জন্য)
+# 🌐 ৮. হেলথ চেক ওয়েব সার্ভার (২৪/৭ পোর্ট ম্যানেজমেন্ট)
 # ==============================================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -606,15 +606,26 @@ class HealthHandler(BaseHTTPRequestHandler):
         return
 
 def run_health_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    server.serve_forever()
+    try:
+        server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+        logging.info(f"🌐 Health Server running successfully on port {PORT}")
+        server.serve_forever()
+    except Exception as e:
+        logging.warning(f"Health server port binding issue: {e}")
 
 # ==============================================================================
-# 🚀 ৯. মেইন রানার
+# 🚀 ৯. মেইন রানার (ওয়েবহুক ক্লিনার সহ)
 # ==============================================================================
 if __name__ == "__main__":
     init_db()
+    
+    # 🔥 টেলিগ্রামের সমস্ত পুরনো ব্লক/ওয়েবহুক এক ক্লিকে মুছে ফেলা
+    logging.info("🧹 Clearing previous Webhook & pending queue...")
+    tg_api("deleteWebhook", {"drop_pending_updates": True})
+    
+    # ব্যাকগ্রাউন্ড থ্রেড রান
     threading.Thread(target=run_health_server, daemon=True).start()
     threading.Thread(target=live_auto_signal_loop, daemon=True).start()
+    
     logging.info("👑 SAGOR VIP INJECTOR STARTED SUCCESSFULLY!")
     process_updates()
