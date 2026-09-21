@@ -31,7 +31,6 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 # ==============================================================================
 DB_PATH = "sagor_quantum_system.db"
 
-# ইউজার কোডের সকল ইমোজি এবং লোগোর ডিফল্ট ডিকশনারি
 DEFAULT_ICONS = {
     "main_logo": "👑",
     "period_icon": "⚡",
@@ -76,7 +75,7 @@ def init_db():
             icons_json TEXT DEFAULT ''
         )
     """)
-    cur.execute("INSERT OR IGNORE INTO system_stats (id, maintenance, connected_channel_id, icons_json) VALUES (1, 0, '', ?)", (json.dumps(DEFAULT_ICONS),))
+    cur.execute("INSERT OR IGNORE INTO system_stats (id, maintenance, connected_channel_id, icons_json) VALUES (1, 0, '', ?)", (json.dumps(DEFAULT_ICONS, ensure_ascii=False),))
     
     try:
         cur.execute("ALTER TABLE system_stats ADD COLUMN icons_json TEXT DEFAULT ''")
@@ -127,7 +126,7 @@ def get_all_icons():
 def update_single_icon(key, val):
     icons = get_all_icons()
     icons[key] = val
-    db_query("UPDATE system_stats SET icons_json = ? WHERE id = 1", (json.dumps(icons),), commit=True)
+    db_query("UPDATE system_stats SET icons_json = ? WHERE id = 1", (json.dumps(icons, ensure_ascii=False),), commit=True)
 
 # ==============================================================================
 # 📡 ৩. TELEGRAM API
@@ -135,12 +134,13 @@ def update_single_icon(key, val):
 def tg_api(method, payload=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     try:
-        data = json.dumps(payload).encode("utf-8") if payload else None
-        headers = {"Content-Type": "application/json"}
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload else None
+        headers = {"Content-Type": "application/json; charset=utf-8"}
         req = urllib.request.Request(url, data=data, headers=headers)
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as res:
             return json.loads(res.read().decode("utf-8"))
-    except Exception:
+    except Exception as e:
+        logging.error(f"Telegram API Error: {e}")
         return None
 
 def send_msg(chat_id, text, reply_markup=None):
@@ -149,11 +149,13 @@ def send_msg(chat_id, text, reply_markup=None):
         payload["reply_markup"] = reply_markup
     return tg_api("sendMessage", payload)
 
-def copy_msg(chat_id, from_chat_id, message_id, caption=None):
+def copy_msg(chat_id, from_chat_id, message_id, caption=None, reply_markup=None):
     payload = {"chat_id": chat_id, "from_chat_id": from_chat_id, "message_id": message_id}
     if caption:
         payload["caption"] = caption
         payload["parse_mode"] = "HTML"
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     return tg_api("copyMessage", payload)
 
 def delete_msg(chat_id, message_id):
@@ -173,7 +175,51 @@ def edit_msg(chat_id, msg_id, text, reply_markup=None):
     return tg_api("editMessageText", payload)
 
 # ==============================================================================
-# 🎯 ৪. পিওর র্যান্ডম প্রেডিকশন ইঞ্জিন
+# 🔥 ৪. ১০০% টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি ফুল-কনভার্টার (UTF-16 Code-Unit Safe)
+# ==============================================================================
+def parse_and_extract_custom_emojis(message_obj):
+    """
+    যেকোনো টেক্সট অথবা ক্যাপশন থেকে সাধারণ ও প্রিমিয়াম কাস্টম ইমোজি
+    সরাসরি <tg-emoji id="..."> ফরম্যাটে ১০০% নির্ভুলভাবে রূপান্তর করে।
+    """
+    text = message_obj.get("text", "") or message_obj.get("caption", "")
+    entities = message_obj.get("entities", []) or message_obj.get("caption_entities", [])
+    
+    if not text:
+        return "👑"
+        
+    if not entities:
+        return text.strip()
+
+    # টেলিগ্রাম অফসেট UTF-16 Code-Units এ কাজ করে
+    encoded = text.encode("utf-16-le")
+    
+    # ডান দিক থেকে বামে রিপ্লেস করব যাতে ইনডেক্স উল্টাপাল্টা না হয়
+    custom_entities = [e for e in entities if e.get("type") == "custom_emoji"]
+    if not custom_entities:
+        return text.strip()
+
+    custom_entities.sort(key=lambda x: x.get("offset", 0), reverse=True)
+
+    for ent in custom_entities:
+        custom_id = ent.get("custom_emoji_id")
+        offset = ent.get("offset", 0)
+        length = ent.get("length", 1)
+        
+        start_b = offset * 2
+        end_b = (offset + length) * 2
+        
+        emoji_char = encoded[start_b:end_b].decode("utf-16-le", errors="ignore")
+        if not emoji_char:
+            emoji_char = "💎"
+            
+        replacement = f'<tg-emoji id="{custom_id}">{emoji_char}</tg-emoji>'
+        encoded = encoded[:start_b] + replacement.encode("utf-16-le") + encoded[end_b:]
+        
+    return encoded.decode("utf-16-le", errors="ignore").strip()
+
+# ==============================================================================
+# 🎯 ৫. প্রেডিকশন ইঞ্জিন
 # ==============================================================================
 BIG_POOL = [5, 6, 7, 8, 9]
 SMALL_POOL = [0, 1, 2, 3, 4]
@@ -198,7 +244,7 @@ class QuantumRandomEngine:
 engine = QuantumRandomEngine()
 
 # ==============================================================================
-# 🎨 ৫. কীবোর্ড ও সিগন্যাল টেমপ্লেট
+# 🎨 ৬. কীবোর্ড ও সিগন্যাল টেমপ্লেট
 # ==============================================================================
 BTN_START = "⚡ 𝗦𝗧𝗔𝗥𝗧 𝗔𝗨𝗧𝗢 𝗦𝗜𝗚𝗡𝗔𝗟 ⚡"
 BTN_STOP = "🛑 𝗦𝗧𝗢𝗣 𝗦𝗜𝗚𝗡𝗔𝗟 🛑"
@@ -208,7 +254,6 @@ BTN_FUND = "💰 𝟳-𝗦𝗧𝗘𝗣 𝗙𝗨𝗡𝗗 𝗠𝗔𝗡𝗔𝗚💰
 BTN_SUPPORT = "💬 𝗩𝗜𝗣 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 💬"
 BTN_ADMIN = "👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗣𝗔𝗡𝗘𝗟 👑"
 
-# ইউজার কোডের সকল ইমোজির লেবেল (এডমিন প্যানেলে বাটন তৈরির জন্য)
 ICON_LABELS = {
     "main_logo": "🏷️ মেইন লোগো",
     "period_icon": "⚡ পিরিয়ড ইমোজি",
@@ -243,7 +288,7 @@ def get_welcome_message(first_name, user_id):
         f"<b>{ic['main_logo']} স্বাগতম, {first_name}! {ic['main_logo']}</b>\n"
         f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
         f"<b>{ic['welcome_star']} 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 𝗦𝗘𝗥𝗩𝗘𝗥 𝗩𝟮𝟬-এ আপনাকে স্বাগতম!</b>\n\n"
-        f"<b>{ic['welcome_rocket']} এটি বিশ্বের অন্যতম শক্তিশালী AI চালিত ১-মিনিট ডাইনামিক প্রেডিকশন সিস্টেম যা উইংগো অ্যালগরিদম নিখুঁতভাবে ইনজেক্ট করে।</b>\n\n"
+        f"<b>{ic['welcome_rocket']} এটি বিশ্বের অন্যতম শক্তিশালী AI চালিত ১-মিনিট ডাইনামিক প্রেডিকশন সিস্টেম।</b>\n\n"
         f"<b>{ic['pred_icon']} আমাদের বিশেষ ফিচারসমূহ:</b>\n"
         f"<b>├ {ic['active_badge']} অটো লাইভ রিপ্লেস : প্রতি মিনিটে মেসেজ স্বয়ংক্রিয়ভাবে রিফ্রেশ হবে</b>\n"
         f"<b>├ {ic['pred_icon']} BIG & SMALL নিখুঁত ট্রেন্ড ফিল্টারিং</b>\n"
@@ -283,35 +328,13 @@ def format_signal_msg(period, pred, numbers=None, level=1):
     )
 
 # ==============================================================================
-# 🎮 ৬. টেলিগ্রাম প্রিমিয়াম ইমোজি এক্সট্রাক্টর ফাংশন
-# ==============================================================================
-def extract_raw_or_premium_emoji(message_obj):
-    """মেসেজ থেকে সাধারণ ইমোজি অথবা টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি HTML আকারে তৈরি করে"""
-    text = message_obj.get("text", "")
-    entities = message_obj.get("entities", [])
-    
-    # প্রিমিয়াম কাস্টম ইমোজি চেক
-    for ent in entities:
-        if ent.get("type") == "custom_emoji":
-            offset = ent.get("offset", 0)
-            length = ent.get("length", len(text))
-            emoji_char = text[offset:offset+length]
-            custom_id = ent.get("custom_emoji_id")
-            return f'<tg-emoji id="{custom_id}">{emoji_char}</tg-emoji>'
-            
-    return text.strip()
-
-# ==============================================================================
 # 🎮 ৭. কন্ট্রোলার ও স্টেট ট্র্যাকার
 # ==============================================================================
 waiting_broadcast_admin = None
 waiting_ban_admin = None
 waiting_unban_admin = None
 waiting_channel_admin = None
-
-# ইমোজি পরিবর্তন ট্র্যাকার
 waiting_icon_change = {}
-
 admin_live_sender_mode = {}
 user_submit_state = {}
 
@@ -341,14 +364,11 @@ def process_updates():
                             continue
 
                         if user_id in ADMIN_IDS:
-                            # অল ইমোজি ও লোগো ম্যানেজার সাবমেনু
                             if data == "adm_emoji_menu":
                                 ic = get_all_icons()
                                 rows = []
                                 cur_row = []
                                 for k, name in ICON_LABELS.items():
-                                    val = ic.get(k, "👑")
-                                    # বাটনে ইমোজিসহ শো
                                     cur_row.append({"text": f"{name}", "callback_data": f"chgicon_{k}"})
                                     if len(cur_row) == 2:
                                         rows.append(cur_row)
@@ -359,7 +379,6 @@ def process_updates():
                                 answer_callback(cq_id)
                                 edit_msg(user_id, msg_id, "<b>🎨 ইউজার কোডের অল ইমোজি ও লোগো ম্যানেজার:</b>\n\nযে ইমোজি বা লোগোটি পরিবর্তন করতে চান নিচের বাটন চাপুন:", {"inline_keyboard": rows})
 
-                            # নির্দিষ্ট ইমোজি পরিবর্তনের রিকোয়েস্ট
                             elif data.startswith("chgicon_"):
                                 target_key = data.replace("chgicon_", "")
                                 waiting_icon_change[user_id] = target_key
@@ -367,17 +386,16 @@ def process_updates():
                                 ic = get_all_icons()
                                 cur_val = ic.get(target_key, "")
                                 answer_callback(cq_id)
-                                send_msg(user_id, f"<b>✍️ পরিবর্তন অপশন: {lbl}</b>\n\nবর্তমান অ্যাক্টিভ মান: {cur_val}\n\n👉 <b>আপনার কিবোর্ড থেকে সাধারণ ইমোজি অথবা টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি সেন্ড করুন:</b>")
+                                send_msg(user_id, f"<b>✍️ পরিবর্তন অপশন: {lbl}</b>\n\nবর্তমান অ্যাক্টিভ মান: {cur_val}\n\n👉 <b>আপনার কিবোর্ড থেকে সাধারণ ইমোজি অথবা যেকোনো টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি সেন্ড করুন:</b>")
 
                             elif data == "adm_back_panel":
                                 cur_st = "🟢 চালু" if admin_live_sender_mode.get(user_id, False) else "🔴 বন্ধ"
-                                ic = get_all_icons()
                                 adm_kb = {
                                     "inline_keyboard": [
                                         [{"text": f"⚡ লাইভ সিগন্যাল মোড ({cur_st})", "callback_data": "adm_toggle_sender"}],
                                         [{"text": f"🎨 অল ইমোজি ও লোগো ম্যানেজার", "callback_data": "adm_emoji_menu"}],
                                         [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "⏳ পেন্ডিং রিকোয়েস্ট", "callback_data": "adm_pending"}],
-                                        [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
+                                        [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট (অল ইউজার)", "callback_data": "adm_bc"}],
                                         [{"text": "🛠️ মেইনটেনেন্স মোড", "callback_data": "adm_maint"}, {"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}],
                                         [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}]
                                     ]
@@ -468,7 +486,7 @@ def process_updates():
                             elif data == "adm_bc":
                                 waiting_broadcast_admin = user_id
                                 answer_callback(cq_id)
-                                send_msg(user_id, "<b>✍️ ব্রডকাস্ট মেসেজটি পাঠান (ছবি, ভিডিও, ফাইল, স্টিকার বা যেকোনো টেক্সট):</b>")
+                                send_msg(user_id, "<b>✍️ ব্রডকাস্টের জন্য যেকোনো কিছু পাঠান (টেক্সট, ফটো, ভিডিও, অডিও, ভয়েস, স্টিকার বা প্রিমিয়াম ইমোজি যুক্ত পোস্ট):</b>\n\n<i>বাতিল করতে চাইলে /cancel লিখুন।</i>")
 
                             elif data == "adm_ban_user":
                                 waiting_ban_admin = user_id
@@ -492,7 +510,6 @@ def process_updates():
                         chat_id = msg["chat"]["id"]
                         msg_id = msg["message_id"]
                         text = msg.get("text", "").strip() if "text" in msg else ""
-                        caption = msg.get("caption", "").strip() if "caption" in msg else ""
                         first_name = msg.get("from", {}).get("first_name", "VIP Trader")
                         username = msg.get("from", {}).get("username", "None")
 
@@ -509,47 +526,53 @@ def process_updates():
                             send_msg(chat_id, "<b>🚫 আপনার অ্যাকাউন্টটি ব্যান রয়েছে। সাহায্যের জন্য সাপোর্টে যোগাযোগ করুন।</b>")
                             continue
 
-                        # 🔥 টেলিগ্রাম প্রিমিয়াম ও নরমাল ইমোজি রিয়েল-টাইম সেভার 🔥
+                        # 🔥 ১. ১০০% টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি পার্স এবং সেভ লজিক 🔥
                         if chat_id in ADMIN_IDS and chat_id in waiting_icon_change:
                             target_key = waiting_icon_change[chat_id]
                             del waiting_icon_change[chat_id]
                             
-                            # প্রিমিয়াম কাস্টম ইমোজি ফরম্যাটিং
-                            new_icon_val = extract_raw_or_premium_emoji(msg)
+                            new_icon_val = parse_and_extract_custom_emojis(msg)
                             update_single_icon(target_key, new_icon_val)
                             lbl = ICON_LABELS.get(target_key, target_key)
-                            send_msg(chat_id, f"<b>✅ প্রিমিয়াম ইমোজি/লোগো সফলভাবে সেভ হয়েছে!</b>\n\n📌 <b>বিষয়:</b> {lbl}\n✨ <b>নতুন মান:</b> {new_icon_val}\n\n<i>এখন থেকে এই মানটি ইউজার সিগন্যালে স্বয়ংক্রিয়ভাবে কাজ করবে।</i>")
+                            
+                            send_msg(
+                                chat_id, 
+                                f"<b>✅ প্রিমিয়াম ইমোজি/লোগো সফলভাবে ডাটাবেজে সেভ হয়েছে!</b>\n\n"
+                                f"📌 <b>বিষয়:</b> {lbl}\n"
+                                f"✨ <b>অ্যাক্টিভ প্রিভিউ:</b> {new_icon_val}\n\n"
+                                f"<i>এখন থেকে ইউজারদের সকল সিগন্যালে এটি অটোমেটিক শো করবে।</i>"
+                            )
                             continue
 
-                        # 🔥 এডমিন স্পেশাল: ১০০% মিডিয়া ব্রডকাস্ট হ্যান্ডলার 🔥
+                        # 🔥 ২. অল ব্রডকাস্ট হ্যান্ডলার (সকল ইউজারের কাছে ১০০% যেকোনো কিছু যাবে) 🔥
                         if chat_id in ADMIN_IDS and waiting_broadcast_admin == chat_id:
-                            if text != "/cancel":
-                                waiting_broadcast_admin = None
-                                users = db_query("SELECT user_id FROM users WHERE is_banned = 0", fetchall=True) or []
-                                c = 0
-                                extra_footer = f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n👉 <b>রেজিস্ট্রেশন লিংক:</b> {REGISTER_LINK}\n📡 <b>CONTACK:</b> @{SUPPORT_USERNAME}"
-                                
-                                for row in users:
-                                    try:
-                                        target_uid = row[0]
-                                        if text:
-                                            full_text = f"<b>📢 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 অফিসিয়াল নোটিশ:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n{text}{extra_footer}"
-                                            send_msg(target_uid, full_text)
-                                        else:
-                                            new_cap = f"{caption}{extra_footer}" if caption else f"<b>📢 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 নোটিশ</b>{extra_footer}"
-                                            copy_msg(target_uid, chat_id, msg_id, caption=new_cap if "sticker" not in msg else None)
-                                        c += 1
-                                        time.sleep(0.04)
-                                    except Exception:
-                                        pass
-                                send_msg(chat_id, f"<b>✅ সফলভাবে মোট <code>{c}</code> জন ইউজারের কাছে ব্রডকাস্ট পাঠানো হয়েছে।</b>")
-                                continue
-                            else:
+                            if text == "/cancel":
                                 waiting_broadcast_admin = None
                                 send_msg(chat_id, "<b>🚫 ব্রডকাস্ট বাতিল করা হয়েছে।</b>")
                                 continue
 
-                        # 🔥 এডমিন স্পেশাল: চ্যানেলে সরাসরি সিগন্যাল পোস্ট 🔥
+                            waiting_broadcast_admin = None
+                            users = db_query("SELECT user_id FROM users WHERE is_banned = 0", fetchall=True) or []
+                            total_target = len(users)
+                            success_count = 0
+
+                            status_msg = send_msg(chat_id, f"<b>⏳ ব্রডকাস্ট শুরু হয়েছে... মোট ইউজার: {total_target} জন</b>")
+                            
+                            for row in users:
+                                target_uid = row[0]
+                                try:
+                                    # copyMessage দিয়ে টেক্সট, ফটো, ভিডিও, স্টিকার, প্রিমিয়াম ইমোজি হুবহু যায়
+                                    res = copy_msg(target_uid, chat_id, msg_id)
+                                    if res and "result" in res:
+                                        success_count += 1
+                                    time.sleep(0.04) # Telegram Anti-Flood Rate limit
+                                except Exception:
+                                    pass
+
+                            send_msg(chat_id, f"<b>✅ অল ব্রডকাস্ট সম্পন্ন!</b>\n\n👥 মোট ইউজার: <code>{total_target}</code> জন\n🎯 সফলভাবে পাঠানো হয়েছে: <code>{success_count}</code> জনের কাছে।")
+                            continue
+
+                        # 🔥 ৩. এডমিন লাইভ চ্যানেল সিগন্যাল সেন্ডার 🔥
                         if chat_id in ADMIN_IDS and admin_live_sender_mode.get(chat_id, False) and text:
                             parts = text.split()
                             cmd_word = parts[0].upper()
@@ -577,7 +600,7 @@ def process_updates():
                                 else:
                                     send_msg(chat_id, "<b>⚠️ কোনো চ্যানেল কানেক্ট করা নেই! এডমিন প্যানেল থেকে চ্যানেল সেট করুন।</b>")
 
-                        # এডমিন ইনপুট হ্যান্ডলিং
+                        # এডমিন কমান্ড ও সেটিংস ইনপুট
                         if chat_id in ADMIN_IDS:
                             if waiting_channel_admin == chat_id and not text.startswith("/"):
                                 waiting_channel_admin = None
@@ -676,7 +699,7 @@ def process_updates():
                             send_msg(chat_id, "<b>🛠️ সার্ভারে মেইনটেনেন্স ও আপগ্রেডেশনের কাজ চলছে! অনুগ্রহ করে কিছুক্ষণ পর পুনরায় চেষ্টা করুন।</b>")
                             continue
 
-                        # মেনু অপশন
+                        # মেনু অপশনসমূহ
                         if text == "/start":
                             send_msg(chat_id, get_welcome_message(first_name, chat_id), get_main_keyboard(chat_id))
 
@@ -687,7 +710,7 @@ def process_updates():
                                     [{"text": f"⚡ লাইভ সিগন্যাল মোড ({cur_st})", "callback_data": "adm_toggle_sender"}],
                                     [{"text": f"🎨 অল ইমোজি ও লোগো ম্যানেজার", "callback_data": "adm_emoji_menu"}],
                                     [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "⏳ পেন্ডিং রিকোয়েস্ট", "callback_data": "adm_pending"}],
-                                    [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
+                                    [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট (অল ইউজার)", "callback_data": "adm_bc"}],
                                     [{"text": "🛠️ মেইনটেনেন্স মোড", "callback_data": "adm_maint"}, {"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}],
                                     [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}]
                                 ]
@@ -697,8 +720,8 @@ def process_updates():
                                 "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "💡 <b>লাইভ সেন্ডার মোড চালু থাকলে:</b>\n"
-                                "• শুধু লিখুন: <code>BIG</code> অথবা <code>SMALL</code> (নাম্বার ছাড়া যাবে)\n"
-                                "• অথবা লিখুন: <code>BIG 5 8</code> / <code>SMALL 1 3</code> (নাম্বার সহ যাবে)\n"
+                                "• শুধু লিখুন: <code>BIG</code> অথবা <code>SMALL</code>\n"
+                                "• অথবা লিখুন: <code>BIG 5 8</code> / <code>SMALL 1 3</code>\n"
                                 "সরাসরি চ্যানেলে সমান ফরম্যাটে পোস্ট হয়ে যাবে!\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━",
                                 adm_kb
@@ -759,13 +782,13 @@ def process_updates():
                             fund_txt = (
                                 "<b>💰 অফিসিয়াল ৭-স্টেপ (𝟳-𝗦𝗧𝗘𝗣) মার্টিঙ্গেল ব্যাকআপ চার্ট</b>\n"
                                 "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-                                "<b>🔹 𝗦𝘁𝗲𝗽 𝟭 : <code>7.87 BDT</code>   ➜ (মূল প্রফিট)</b>\n"
-                                "<b>🔹 𝗦𝘁𝗲𝗽 𝟮 : <code>15.75 BDT</code>   ➜ (রিকভারি + লাভ)</b>\n"
-                                "<b>🔹 𝗦𝘁𝗲𝗽 𝟯 : <code>31.50 BDT</code>   ➜ (রিকভারি + লাভ)</b>\n"
-                                "<b>🔹 𝗦𝘁𝗲𝗽 𝟰 : <code>62.99 BDT</code>  ➜ (রিকভারি + লাভ)</b>\n"
-                                "<b>🔹 𝗦𝘁𝗲𝗽 𝟱 : <code>125.98 BDT</code>  ➜ (রিকভারি + লাভ)</b>\n"
-                                "<b>🔹 𝗦𝘁𝗲𝗽 𝟲 : <code>251.97 BDT</code> ➜ (রিকভারি + লাভ)</b>\n"
-                                "<b>🔹 𝗦𝘁𝗲𝗽 𝟳 : <code>503.94 BDT</code> ➜ (হাই সিকিউর প্রফিট)</b>\n"
+                                "<b>🔹 𝗦𝘁𝗲প 𝟭 : <code>7.87 BDT</code>   ➜ (মূল প্রফিট)</b>\n"
+                                "<b>🔹 𝗦𝘁𝗲প 𝟮 : <code>15.75 BDT</code>   ➜ (রিকভারি + লাভ)</b>\n"
+                                "<b>🔹 𝗦𝘁𝗲প 𝟯 : <code>31.50 BDT</code>   ➜ (রিকভারি + লাভ)</b>\n"
+                                "<b>🔹 𝗦𝘁𝗲প 𝟰 : <code>62.99 BDT</code>  ➜ (রিকভারি + লাভ)</b>\n"
+                                "<b>🔹 𝗦𝘁𝗲প 𝟱 : <code>125.98 BDT</code>  ➜ (রিকভারি + লাভ)</b>\n"
+                                "<b>🔹 𝗦𝘁𝗲প 𝟲 : <code>251.97 BDT</code> ➜ (রিকভারি + লাভ)</b>\n"
+                                "<b>🔹 𝗦𝘁𝗲প 𝟳 : <code>503.94 BDT</code> ➜ (হাই সিকিউর প্রফিট)</b>\n"
                                 "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
                                 "<b>💎 মোট প্রয়োজনীয় ব্যাকআপ ফান্ড : <code>1000 BDT</code></b>\n"
                                 "<b>⚠️ মনে রাখবেন: মানি ম্যানেজমেন্ট না মানলে কোনো অ্যালগরিদমই লাভ দিতে পারবে না।</b>\n"
@@ -789,7 +812,7 @@ def process_updates():
             time.sleep(1)
 
 # ==============================================================================
-# 🔄 ৮. ১-মিনিট রিয়েল-টাইম অটো রিপ্লেস ক্রন লুপ (ইউজারদের জন্য)
+# 🔄 ৮. ১-মিনিট রিয়েল-টাইম অটো রিপ্লেস ক্রন লুপ
 # ==============================================================================
 def live_auto_signal_loop():
     logging.info("⚡ 1-Minute Live Signal Loop Started...")
