@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==============================================================================
-# ⚙️ ১. কনফিগারেশন সেটিংস (২ জন এডমিন)
+# ⚙️ ১. কনফিগারেশন সেটিংস
 # ==============================================================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8968313328:AAGZSQ0BzAfj_AaIJTq3wtWbrjsCAct8Sps")
 ADMIN_IDS = [6753121703, 7122259829]
@@ -31,7 +31,6 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 # ==============================================================================
 DB_PATH = "sagor_quantum_system.db"
 
-# ইউজার কোডের সকল ইমোজি এবং লোগোর ডিফল্ট ডিকশনারি
 DEFAULT_ICONS = {
     "main_logo": "👑",
     "period_icon": "⚡",
@@ -76,8 +75,10 @@ def init_db():
             icons_json TEXT DEFAULT ''
         )
     """)
+    
     cur.execute("INSERT OR IGNORE INTO system_stats (id, maintenance, connected_channel_id, icons_json) VALUES (1, 0, '', ?)", (json.dumps(DEFAULT_ICONS),))
     
+    # কলাম ব্যাকওয়ার্ড কম্প্যাটিবিলিটি
     try:
         cur.execute("ALTER TABLE system_stats ADD COLUMN icons_json TEXT DEFAULT ''")
     except Exception:
@@ -87,8 +88,8 @@ def init_db():
         cur.execute("""
             INSERT OR IGNORE INTO users (user_id, username, first_name, is_verified, joined_at)
             VALUES (?, 'admin', 'Super Admin', 1, ?)
-        """, (adm, time.strftime("%Y-%m-%d %H:%M:%S")))
-        cur.execute("UPDATE users SET is_verified = 1, is_banned = 0 WHERE user_id = ?", (adm,))
+        """, (int(adm), time.strftime("%Y-%m-%d %H:%M:%S")))
+        cur.execute("UPDATE users SET is_verified = 1, is_banned = 0 WHERE user_id = ?", (int(adm),))
         
     conn.commit()
     conn.close()
@@ -140,7 +141,8 @@ def tg_api(method, payload=None):
         req = urllib.request.Request(url, data=data, headers=headers)
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as res:
             return json.loads(res.read().decode("utf-8"))
-    except Exception:
+    except Exception as e:
+        logging.error(f"API Error ({method}): {e}")
         return None
 
 def send_msg(chat_id, text, reply_markup=None):
@@ -173,7 +175,7 @@ def edit_msg(chat_id, msg_id, text, reply_markup=None):
     return tg_api("editMessageText", payload)
 
 # ==============================================================================
-# 🎯 ৪. পিওর র্যান্ডম প্রেডিকশন ইঞ্জিন
+# 🎯 ৪. র্যান্ডম প্রেডিকশন ইঞ্জিন
 # ==============================================================================
 BIG_POOL = [5, 6, 7, 8, 9]
 SMALL_POOL = [0, 1, 2, 3, 4]
@@ -208,7 +210,6 @@ BTN_FUND = "💰 𝟳-𝗦𝗧𝗘𝗣 𝗙𝗨𝗡𝗗 𝗠𝗔𝗡𝗔𝗚𝗘
 BTN_SUPPORT = "💬 𝗩𝗜𝗣 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 💬"
 BTN_ADMIN = "👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗣𝗔𝗡𝗘𝗟 👑"
 
-# ইউজার কোডের সকল ইমোজির লেবেল (এডমিন প্যানেলে বাটন তৈরির জন্য)
 ICON_LABELS = {
     "main_logo": "🏷️ মেইন লোগো",
     "period_icon": "⚡ পিরিয়ড ইমোজি",
@@ -227,13 +228,29 @@ ICON_LABELS = {
     "future_icon": "🔮 ফিউচার আইকন"
 }
 
+def is_admin(user_id):
+    return int(user_id) in [int(x) for x in ADMIN_IDS]
+
+def get_admin_panel_markup(user_id):
+    cur_st = "🟢 চালু" if admin_live_sender_mode.get(int(user_id), False) else "🔴 বন্ধ"
+    return {
+        "inline_keyboard": [
+            [{"text": f"⚡ লাইভ সিগন্যাল মোড ({cur_st})", "callback_data": "adm_toggle_sender"}],
+            [{"text": "🎨 অল ইমোজি ও লোগো ম্যানেজার", "callback_data": "adm_emoji_menu"}],
+            [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "⏳ পেন্ডিং রিকোয়েস্ট", "callback_data": "adm_pending"}],
+            [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
+            [{"text": "🛠️ মেইনটেনেন্স মোড", "callback_data": "adm_maint"}, {"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}],
+            [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}]
+        ]
+    }
+
 def get_main_keyboard(user_id):
     kb = [
         [{"text": BTN_START}, {"text": BTN_STOP}],
         [{"text": BTN_FUTURE}, {"text": BTN_RADAR}],
         [{"text": BTN_FUND}, {"text": BTN_SUPPORT}]
     ]
-    if user_id in ADMIN_IDS:
+    if is_admin(user_id):
         kb.append([{"text": BTN_ADMIN}])
     return {"keyboard": kb, "resize_keyboard": True}
 
@@ -282,15 +299,9 @@ def format_signal_msg(period, pred, numbers=None, level=1):
         f"{ic['contact_icon']} <b>CONTACK</b> @{SUPPORT_USERNAME}"
     )
 
-# ==============================================================================
-# 🎮 ৬. টেলিগ্রাম প্রিমিয়াম ইমোজি এক্সট্রাক্টর ফাংশন
-# ==============================================================================
 def extract_raw_or_premium_emoji(message_obj):
-    """মেসেজ থেকে সাধারণ ইমোজি অথবা টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি HTML আকারে তৈরি করে"""
     text = message_obj.get("text", "")
     entities = message_obj.get("entities", [])
-    
-    # প্রিমিয়াম কাস্টম ইমোজি চেক
     for ent in entities:
         if ent.get("type") == "custom_emoji":
             offset = ent.get("offset", 0)
@@ -298,20 +309,16 @@ def extract_raw_or_premium_emoji(message_obj):
             emoji_char = text[offset:offset+length]
             custom_id = ent.get("custom_emoji_id")
             return f'<tg-emoji id="{custom_id}">{emoji_char}</tg-emoji>'
-            
     return text.strip()
 
 # ==============================================================================
-# 🎮 ৭. কন্ট্রোলার ও স্টেট ট্র্যাকার
+# 🎮 ৬. কন্ট্রোলার ও স্টেট ট্র্যাকার
 # ==============================================================================
 waiting_broadcast_admin = None
 waiting_ban_admin = None
 waiting_unban_admin = None
 waiting_channel_admin = None
-
-# ইমোজি পরিবর্তন ট্র্যাকার
 waiting_icon_change = {}
-
 admin_live_sender_mode = {}
 user_submit_state = {}
 
@@ -330,25 +337,29 @@ def process_updates():
                     if "callback_query" in u:
                         cq = u["callback_query"]
                         cq_id = cq["id"]
-                        data = cq["data"]
-                        user_id = cq["from"]["id"]
-                        msg_id = cq["message"]["message_id"]
+                        data = cq.get("data", "")
+                        user_id = int(cq["from"]["id"])
+                        msg_obj = cq.get("message", {})
+                        chat_id = msg_obj.get("chat", {}).get("id", user_id)
+                        msg_id = msg_obj.get("message_id")
 
+                        # ইউজার সাবমিশন
                         if data == "usr_submit_form":
-                            user_submit_state[user_id] = {"step": 1, "uid": ""}
                             answer_callback(cq_id)
+                            user_submit_state[user_id] = {"step": 1, "uid": ""}
                             send_msg(user_id, "<b>✍️ অনুগ্রহ করে আপনার গেমের সঠিক User ID (UID) টি লিখুন:</b>")
                             continue
 
-                        if user_id in ADMIN_IDS:
-                            # অল ইমোজি ও লোগো ম্যানেজার সাবমেনু
+                        # এডমিন প্যানেল হ্যান্ডলার
+                        if is_admin(user_id):
+                            # ইমোজি মেনু
                             if data == "adm_emoji_menu":
+                                answer_callback(cq_id)
                                 ic = get_all_icons()
                                 rows = []
                                 cur_row = []
                                 for k, name in ICON_LABELS.items():
                                     val = ic.get(k, "👑")
-                                    # বাটনে ইমোজিসহ শো
                                     cur_row.append({"text": f"{name}", "callback_data": f"chgicon_{k}"})
                                     if len(cur_row) == 2:
                                         rows.append(cur_row)
@@ -356,83 +367,77 @@ def process_updates():
                                 if cur_row:
                                     rows.append(cur_row)
                                 rows.append([{"text": "🔙 ব্যাক (মেইন প্যানেল)", "callback_data": "adm_back_panel"}])
-                                answer_callback(cq_id)
-                                edit_msg(user_id, msg_id, "<b>🎨 ইউজার কোডের অল ইমোজি ও লোগো ম্যানেজার:</b>\n\nযে ইমোজি বা লোগোটি পরিবর্তন করতে চান নিচের বাটন চাপুন:", {"inline_keyboard": rows})
+                                edit_msg(chat_id, msg_id, "<b>🎨 ইউজার কোডের অল ইমোজি ও লোগো ম্যানেজার:</b>\n\nযে ইমোজি বা লোগোটি পরিবর্তন করতে চান নিচের বাটন চাপুন:", {"inline_keyboard": rows})
+                                continue
 
-                            # নির্দিষ্ট ইমোজি পরিবর্তনের রিকোয়েস্ট
                             elif data.startswith("chgicon_"):
+                                answer_callback(cq_id)
                                 target_key = data.replace("chgicon_", "")
                                 waiting_icon_change[user_id] = target_key
                                 lbl = ICON_LABELS.get(target_key, target_key)
                                 ic = get_all_icons()
                                 cur_val = ic.get(target_key, "")
-                                answer_callback(cq_id)
-                                send_msg(user_id, f"<b>✍️ পরিবর্তন অপশন: {lbl}</b>\n\nবর্তমান অ্যাক্টিভ মান: {cur_val}\n\n👉 <b>আপনার কিবোর্ড থেকে সাধারণ ইমোজি অথবা টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি সেন্ড করুন:</b>")
+                                send_msg(user_id, f"<b>✍️ পরিবর্তন অপশন: {lbl}</b>\n\nবর্তমান মান: {cur_val}\n\n👉 <b>আপনার কিবোর্ড থেকে সাধারণ ইমোজি অথবা টেলিগ্রাম প্রিমিয়াম কাস্টম ইমোজি সেন্ড করুন:</b>")
+                                continue
 
                             elif data == "adm_back_panel":
-                                cur_st = "🟢 চালু" if admin_live_sender_mode.get(user_id, False) else "🔴 বন্ধ"
-                                ic = get_all_icons()
-                                adm_kb = {
-                                    "inline_keyboard": [
-                                        [{"text": f"⚡ লাইভ সিগন্যাল মোড ({cur_st})", "callback_data": "adm_toggle_sender"}],
-                                        [{"text": f"🎨 অল ইমোজি ও লোগো ম্যানেজার", "callback_data": "adm_emoji_menu"}],
-                                        [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "⏳ পেন্ডিং রিকোয়েস্ট", "callback_data": "adm_pending"}],
-                                        [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
-                                        [{"text": "🛠️ মেইনটেনেন্স মোড", "callback_data": "adm_maint"}, {"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}],
-                                        [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}]
-                                    ]
-                                }
                                 answer_callback(cq_id)
-                                edit_msg(user_id, msg_id, "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\nসম্পূর্ণ সিস্টেম কন্ট্রোল করতে নিচের অপশন ব্যবহার করুন।", adm_kb)
+                                edit_msg(chat_id, msg_id, "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\nসম্পূর্ণ সিস্টেম কন্ট্রোল করতে নিচের অপশন ব্যবহার করুন।", get_admin_panel_markup(user_id))
+                                continue
 
                             elif data.startswith("app_"):
                                 target_id = int(data.split("_")[1])
                                 today_str = time.strftime("%Y-%m-%d")
                                 db_query("UPDATE users SET is_verified = 1, last_access_date = ? WHERE user_id = ?", (today_str, target_id), commit=True)
                                 answer_callback(cq_id, "ইউজার সফলভাবে অ্যাপ্রুভ হয়েছে!", alert=False)
-                                edit_msg(user_id, msg_id, f"<b>✅ ইউজার <code>{target_id}</code> সফলভাবে আজকের জন্য অ্যাপ্রুভ করা হয়েছে!</b>")
-                                
+                                edit_msg(chat_id, msg_id, f"<b>✅ ইউজার <code>{target_id}</code> সফলভাবে আজকের জন্য অ্যাপ্রুভ করা হয়েছে!</b>")
                                 send_msg(
                                     target_id,
                                     f"<b>🎉 অভিনন্দন! আপনার UID ও ডিপোজিট এডমিন কর্তৃক সফলভাবে অনুমোদিত হয়েছে!</b>\n\n<b>এখন আপনি আজকের জন্য 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 সার্ভিসের পূর্ণ এক্সেস পেয়ে গেছেন।</b>\n\n👉 {REGISTER_LINK}",
                                     get_main_keyboard(target_id)
                                 )
+                                continue
 
                             elif data.startswith("rej_"):
                                 target_id = int(data.split("_")[1])
                                 db_query("UPDATE users SET is_verified = -1, is_banned = 1, auto_signal = 0 WHERE user_id = ?", (target_id,), commit=True)
                                 answer_callback(cq_id, "ইউজার রিজেক্ট ও ব্যান করা হয়েছে!", alert=False)
-                                edit_msg(user_id, msg_id, f"<b>🚫 ইউজার <code>{target_id}</code> রিজেক্ট ও ব্যান করা হয়েছে।</b>")
+                                edit_msg(chat_id, msg_id, f"<b>🚫 ইউজার <code>{target_id}</code> রিজেক্ট ও ব্যান করা হয়েছে।</b>")
                                 send_msg(target_id, "<b>❌ দুঃখিত! আপনার প্রদত্ত UID বা ডিপোজিট ডাটা সঠিক না থাকায় এডমিন এক্সেস রিজেক্ট করেছে।</b>")
+                                continue
 
                             elif data == "adm_maint":
-                                cur_m = db_query("SELECT maintenance FROM system_stats WHERE id = 1", fetchone=True)[0]
+                                res = db_query("SELECT maintenance FROM system_stats WHERE id = 1", fetchone=True)
+                                cur_m = res[0] if res else 0
                                 new_m = 0 if cur_m == 1 else 1
                                 db_query("UPDATE system_stats SET maintenance = ? WHERE id = 1", (new_m,), commit=True)
                                 st = "অন (ON) 🔴" if new_m == 1 else "বন্ধ (OFF) 🟢"
-                                answer_callback(cq_id, f"মেইনটেনেন্স: {st}")
-                                edit_msg(user_id, msg_id, f"<b>🛠️ মেইনটেনেন্স মোড বর্তমানে: {st}</b>")
+                                answer_callback(cq_id, f"মেইনটেনেন্স: {st}", alert=True)
+                                edit_msg(chat_id, msg_id, f"<b>🛠️ মেইনটেনেন্স মোড বর্তমানে: {st}</b>\n\nমেইন মেনুতে ফিরতে ব্যাক বাটন চাপুন।", {"inline_keyboard": [[{"text": "🔙 ব্যাক (মেইন প্যানেল)", "callback_data": "adm_back_panel"}]]})
+                                continue
 
                             elif data == "adm_toggle_sender":
                                 cur_mode = admin_live_sender_mode.get(user_id, False)
                                 admin_live_sender_mode[user_id] = not cur_mode
                                 st_text = "🟢 সক্রিয় (ON)" if admin_live_sender_mode[user_id] else "🔴 নিষ্ক্রিয় (OFF)"
-                                answer_callback(cq_id, f"লাইভ সিগন্যাল সেন্ডার মোড: {st_text}", alert=True)
-                                edit_msg(user_id, msg_id, f"<b>⚡ লাইভ চ্যানেল সিগন্যাল সেন্ডার মোড: {st_text}</b>\n\n<i>এখন আপনি বটের ইনবক্সে শুধু <code>BIG</code>, <code>SMALL</code> অথবা নাম্বারসহ <code>BIG 5 8</code> / <code>SMALL 1 3</code> লিখলেই সরাসরি চ্যানেলে পোস্ট হয়ে যাবে!</i>")
+                                answer_callback(cq_id, f"লাইভ সিগন্যাল সেন্ডার: {st_text}", alert=True)
+                                edit_msg(chat_id, msg_id, f"<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ লাইভ সেন্ডার মোড বর্তমানে: {st_text}\n\n<i>ইনবক্সে <code>BIG</code>, <code>SMALL</code> অথবা <code>BIG 5 8</code> লিখলে স্বয়ংক্রিয়ভাবে চ্যানেলে পোস্ট হবে।</i>", get_admin_panel_markup(user_id))
+                                continue
 
                             elif data == "adm_connect_channel":
-                                waiting_channel_admin = user_id
                                 answer_callback(cq_id)
+                                waiting_channel_admin = user_id
                                 send_msg(user_id, "<b>✍️ যে চ্যানেল বা গ্রুপে সিগন্যাল পাঠাতে চান তার ID (যেমন: -100xxxxxxxxxx) অথবা পাবলিক Username (যেমন: @channelusername) দিন:</b>")
+                                continue
 
                             elif data == "adm_users":
+                                answer_callback(cq_id)
                                 users = db_query("SELECT user_id, is_banned, auto_signal, is_verified FROM users", fetchall=True) or []
                                 tot = len(users)
                                 aut = sum(1 for x in users if x[2] == 1)
                                 ban = sum(1 for x in users if x[1] == 1)
                                 verified = sum(1 for x in users if x[3] == 1)
                                 pending = sum(1 for x in users if x[3] == 0)
-                                answer_callback(cq_id)
                                 send_msg(
                                     user_id,
                                     f"<b>📊 𝗦𝗔𝗚𝗢𝗥 𝗩𝗜𝗣 ইউজার অ্যানালিটিক্স:</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━</b>\n"
@@ -442,6 +447,7 @@ def process_updates():
                                     f"<b>⚡ লাইভ অটো সিগন্যাল ইউজার: <code>{aut}</code> জন</b>\n"
                                     f"<b>🚫 ব্যানড ইউজার            : <code>{ban}</code> জন</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━</b>"
                                 )
+                                continue
 
                             elif data == "adm_pending":
                                 pendings = db_query("SELECT user_id, first_name, username, game_uid, deposit_amount FROM users WHERE is_verified = 0 AND deposit_amount != ''", fetchall=True) or []
@@ -464,26 +470,32 @@ def process_updates():
                                             f"<b>👤 নাম            : {p[1]}\n🆔 টেলিগ্রাম আইডি: <code>{p[0]}</code>\n🔗 ইউজারনেম     : @{p[2]}\n🎮 গেম UID       : <code>{p[3]}</code>\n💰 ডিপোজিট       : <code>{p[4]} BDT</code></b>",
                                             p_kb
                                         )
+                                continue
 
                             elif data == "adm_bc":
-                                waiting_broadcast_admin = user_id
                                 answer_callback(cq_id)
-                                send_msg(user_id, "<b>✍️ ব্রডকাস্ট মেসেজটি পাঠান (ছবি, ভিডিও, ফাইল, স্টিকার বা যেকোনো টেক্সট):</b>")
+                                waiting_broadcast_admin = user_id
+                                send_msg(user_id, "<b>✍️ ব্রডকাস্ট মেসেজটি পাঠান (ছবি, ভিডিও, ফাইল, স্টিকার বা যেকোনো টেক্সট):</b>\n\nবাতিল করতে /cancel লিখুন।")
+                                continue
 
                             elif data == "adm_ban_user":
-                                waiting_ban_admin = user_id
                                 answer_callback(cq_id)
+                                waiting_ban_admin = user_id
                                 send_msg(user_id, "<b>✍️ যাকে ব্যান করতে চান তার Telegram User ID দিন:</b>")
+                                continue
 
                             elif data == "adm_unban_user":
-                                waiting_unban_admin = user_id
                                 answer_callback(cq_id)
+                                waiting_unban_admin = user_id
                                 send_msg(user_id, "<b>✍️ যাকে আনব্যান করতে চান তার User ID দিন:</b>")
+                                continue
 
                             elif data == "adm_clean_db":
                                 db_query("VACUUM", commit=True)
                                 answer_callback(cq_id, "ডাটাবেজ অপটিমাইজেশন সম্পন্ন!", alert=True)
+                                continue
 
+                        answer_callback(cq_id)
                         continue
 
                     # ----------------- MESSAGE HANDLING -----------------
@@ -496,7 +508,7 @@ def process_updates():
                         first_name = msg.get("from", {}).get("first_name", "VIP Trader")
                         username = msg.get("from", {}).get("username", "None")
 
-                        default_ver = 1 if chat_id in ADMIN_IDS else 0
+                        default_ver = 1 if is_admin(chat_id) else 0
 
                         db_query("""
                             INSERT OR IGNORE INTO users (user_id, username, first_name, is_verified, joined_at)
@@ -505,24 +517,22 @@ def process_updates():
 
                         usr = db_query("SELECT is_banned, auto_signal, last_msg_id, is_verified, last_access_date, game_uid, deposit_amount FROM users WHERE user_id = ?", (chat_id,), fetchone=True)
 
-                        if usr and usr[0] == 1 and chat_id not in ADMIN_IDS:
+                        if usr and usr[0] == 1 and not is_admin(chat_id):
                             send_msg(chat_id, "<b>🚫 আপনার অ্যাকাউন্টটি ব্যান রয়েছে। সাহায্যের জন্য সাপোর্টে যোগাযোগ করুন।</b>")
                             continue
 
-                        # 🔥 টেলিগ্রাম প্রিমিয়াম ও নরমাল ইমোজি রিয়েল-টাইম সেভার 🔥
-                        if chat_id in ADMIN_IDS and chat_id in waiting_icon_change:
+                        # ইমোজি সেভার
+                        if is_admin(chat_id) and chat_id in waiting_icon_change:
                             target_key = waiting_icon_change[chat_id]
                             del waiting_icon_change[chat_id]
-                            
-                            # প্রিমিয়াম কাস্টম ইমোজি ফরম্যাটিং
                             new_icon_val = extract_raw_or_premium_emoji(msg)
                             update_single_icon(target_key, new_icon_val)
                             lbl = ICON_LABELS.get(target_key, target_key)
-                            send_msg(chat_id, f"<b>✅ প্রিমিয়াম ইমোজি/লোগো সফলভাবে সেভ হয়েছে!</b>\n\n📌 <b>বিষয়:</b> {lbl}\n✨ <b>নতুন মান:</b> {new_icon_val}\n\n<i>এখন থেকে এই মানটি ইউজার সিগন্যালে স্বয়ংক্রিয়ভাবে কাজ করবে।</i>")
+                            send_msg(chat_id, f"<b>✅ প্রিমিয়াম ইমোজি/লোগো সফলভাবে সেভ হয়েছে!</b>\n\n📌 <b>বিষয়:</b> {lbl}\n✨ <b>নতুন মান:</b> {new_icon_val}\n\n<i>এখন থেকে এই মানটি সিগন্যালে কাজ করবে।</i>")
                             continue
 
-                        # 🔥 এডমিন স্পেশাল: ১০০% মিডিয়া ব্রডকাস্ট হ্যান্ডলার 🔥
-                        if chat_id in ADMIN_IDS and waiting_broadcast_admin == chat_id:
+                        # ব্রডকাস্ট হ্যান্ডলার
+                        if is_admin(chat_id) and waiting_broadcast_admin == chat_id:
                             if text != "/cancel":
                                 waiting_broadcast_admin = None
                                 users = db_query("SELECT user_id FROM users WHERE is_banned = 0", fetchall=True) or []
@@ -549,20 +559,15 @@ def process_updates():
                                 send_msg(chat_id, "<b>🚫 ব্রডকাস্ট বাতিল করা হয়েছে।</b>")
                                 continue
 
-                        # 🔥 এডমিন স্পেশাল: চ্যানেলে সরাসরি সিগন্যাল পোস্ট 🔥
-                        if chat_id in ADMIN_IDS and admin_live_sender_mode.get(chat_id, False) and text:
+                        # সরাসরি চ্যানেলে সিগন্যাল পোস্ট
+                        if is_admin(chat_id) and admin_live_sender_mode.get(chat_id, False) and text:
                             parts = text.split()
                             cmd_word = parts[0].upper()
                             if cmd_word in ["BIG", "SMALL"]:
                                 sys_data = db_query("SELECT connected_channel_id FROM system_stats WHERE id = 1", fetchone=True)
                                 if sys_data and sys_data[0]:
                                     target_ch = sys_data[0]
-                                    
-                                    custom_nums = []
-                                    for p in parts[1:]:
-                                        if p.isdigit():
-                                            custom_nums.append(int(p))
-                                    
+                                    custom_nums = [int(p) for p in parts[1:] if p.isdigit()]
                                     cur_p = get_exact_game_period()
                                     nums_to_send = custom_nums if len(custom_nums) >= 2 else None
                                     ch_sig_msg = format_signal_msg(cur_p, cmd_word, nums_to_send, level=1)
@@ -578,7 +583,7 @@ def process_updates():
                                     send_msg(chat_id, "<b>⚠️ কোনো চ্যানেল কানেক্ট করা নেই! এডমিন প্যানেল থেকে চ্যানেল সেট করুন।</b>")
 
                         # এডমিন ইনপুট হ্যান্ডলিং
-                        if chat_id in ADMIN_IDS:
+                        if is_admin(chat_id):
                             if waiting_channel_admin == chat_id and not text.startswith("/"):
                                 waiting_channel_admin = None
                                 db_query("UPDATE system_stats SET connected_channel_id = ? WHERE id = 1", (text,), commit=True)
@@ -606,7 +611,7 @@ def process_updates():
                                     send_msg(chat_id, "<b>❌ সঠিক নিউমেরিক ইউজার আইডি প্রদান করুন!</b>")
                                 continue
 
-                        # ইউজার UID ও ডিপোজিট সাবমিশন
+                        # ইউজার সাবমিশন
                         if chat_id in user_submit_state and text:
                             st = user_submit_state[chat_id]
                             if st["step"] == 1:
@@ -651,8 +656,8 @@ def process_updates():
                                     )
                                 continue
 
-                        # সাধারণ ইউজারদের ভেরিফিকেশন ও এক্সপায়ার চেক
-                        if chat_id not in ADMIN_IDS:
+                        # সাধারণ ইউজারদের ভেরিফিকেশন চেক
+                        if not is_admin(chat_id):
                             today_str = time.strftime("%Y-%m-%d")
                             if (usr and usr[3] != 1) or (usr and usr[4] != today_str):
                                 sub_kb = {
@@ -671,37 +676,27 @@ def process_updates():
                                 continue
 
                         # মেইনটেনেন্স চেক
-                        maint = db_query("SELECT maintenance FROM system_stats WHERE id = 1", fetchone=True)[0]
-                        if maint == 1 and chat_id not in ADMIN_IDS:
+                        res_maint = db_query("SELECT maintenance FROM system_stats WHERE id = 1", fetchone=True)
+                        maint = res_maint[0] if res_maint else 0
+                        if maint == 1 and not is_admin(chat_id):
                             send_msg(chat_id, "<b>🛠️ সার্ভারে মেইনটেনেন্স ও আপগ্রেডেশনের কাজ চলছে! অনুগ্রহ করে কিছুক্ষণ পর পুনরায় চেষ্টা করুন।</b>")
                             continue
 
-                        # মেনু অপশন
+                        # মেনু অপশনসমূহ
                         if text == "/start":
                             send_msg(chat_id, get_welcome_message(first_name, chat_id), get_main_keyboard(chat_id))
 
-                        elif text in [BTN_ADMIN, "/admin"] and chat_id in ADMIN_IDS:
-                            cur_st = "🟢 চালু" if admin_live_sender_mode.get(chat_id, False) else "🔴 বন্ধ"
-                            adm_kb = {
-                                "inline_keyboard": [
-                                    [{"text": f"⚡ লাইভ সিগন্যাল মোড ({cur_st})", "callback_data": "adm_toggle_sender"}],
-                                    [{"text": f"🎨 অল ইমোজি ও লোগো ম্যানেজার", "callback_data": "adm_emoji_menu"}],
-                                    [{"text": "📊 ইউজার ডাটা", "callback_data": "adm_users"}, {"text": "⏳ পেন্ডিং রিকোয়েস্ট", "callback_data": "adm_pending"}],
-                                    [{"text": "📢 চ্যানেল কানেক্ট করুন", "callback_data": "adm_connect_channel"}, {"text": "📢 ব্রডকাস্ট", "callback_data": "adm_bc"}],
-                                    [{"text": "🛠️ মেইনটেনেন্স মোড", "callback_data": "adm_maint"}, {"text": "🧹 অপটিমাইজ DB", "callback_data": "adm_clean_db"}],
-                                    [{"text": "🚫 ব্যান ইউজার", "callback_data": "adm_ban_user"}, {"text": "🟢 আনব্যান ইউজার", "callback_data": "adm_unban_user"}]
-                                ]
-                            }
+                        elif text in [BTN_ADMIN, "/admin"] and is_admin(chat_id):
                             send_msg(
                                 chat_id,
                                 "<b>👑 𝗦𝗔𝗚𝗢𝗥 𝗔𝗗𝗠𝗜𝗡 𝗠𝗔𝗦𝗧𝗘𝗥 𝗣𝗔𝗡𝗘𝗟:</b>\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "💡 <b>লাইভ সেন্ডার মোড চালু থাকলে:</b>\n"
-                                "• শুধু লিখুন: <code>BIG</code> অথবা <code>SMALL</code> (নাম্বার ছাড়া যাবে)\n"
-                                "• অথবা লিখুন: <code>BIG 5 8</code> / <code>SMALL 1 3</code> (নাম্বার সহ যাবে)\n"
-                                "সরাসরি চ্যানেলে সমান ফরম্যাটে পোস্ট হয়ে যাবে!\n"
+                                "• শুধু লিখুন: <code>BIG</code> অথবা <code>SMALL</code> (নাম্বার ছাড়া)\n"
+                                "• অথবা লিখুন: <code>BIG 5 8</code> / <code>SMALL 1 3</code> (নাম্বার সহ)\n"
+                                "সরাসরি চ্যানেলে পোস্ট হয়ে যাবে!\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━",
-                                adm_kb
+                                get_admin_panel_markup(chat_id)
                             )
 
                         elif text == BTN_START:
@@ -785,11 +780,11 @@ def process_updates():
                             )
 
         except Exception as e:
-            logging.error(f"Updates Error: {e}")
+            logging.error(f"Updates Loop Error: {e}")
             time.sleep(1)
 
 # ==============================================================================
-# 🔄 ৮. ১-মিনিট রিয়েল-টাইম অটো রিপ্লেস ক্রন লুপ (ইউজারদের জন্য)
+# 🔄 ৭. ১-মিনিট রিয়েল-টাইম অটো রিপ্লেস ক্রন লুপ
 # ==============================================================================
 def live_auto_signal_loop():
     logging.info("⚡ 1-Minute Live Signal Loop Started...")
@@ -802,7 +797,7 @@ def live_auto_signal_loop():
             if current_day != today_check:
                 today_check = current_day
                 db_query(f"UPDATE users SET is_verified = 0, auto_signal = 0 WHERE user_id NOT IN ({','.join(map(str, ADMIN_IDS))})", commit=True)
-                logging.info("🌙 Midnight reset completed. All user access expired for new day validation.")
+                logging.info("🌙 Midnight reset completed.")
 
             new_period = get_exact_game_period()
 
@@ -832,7 +827,7 @@ def live_auto_signal_loop():
         time.sleep(1)
 
 # ==============================================================================
-# 🌐 ৯. ২৪/৭ লাইভ ওয়েব সার্ভার
+# 🌐 ৮. হেলথ চেক ওয়েব সার্ভার
 # ==============================================================================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -848,7 +843,7 @@ def run_health_server():
     server.serve_forever()
 
 # ==============================================================================
-# 🚀 ১০. মেইন এন্ট্রি পয়েন্ট
+# 🚀 ৯. মেইন রানার
 # ==============================================================================
 if __name__ == "__main__":
     init_db()
