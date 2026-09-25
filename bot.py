@@ -253,7 +253,7 @@ def send_force_sub_msg(chat_id, user_id):
 
 
 # =======================================================================
-# 🔐 MILITARY-GRADE POLYMORPHIC ZERO-LEAK CIPHER ENGINE (UNBREAKABLE V2)
+# 🔐 ADVANCED POLYMORPHIC CIPHER ENGINE (100% FIXED & UNBREAKABLE)
 # =======================================================================
 
 BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -355,12 +355,11 @@ def generate_polymorphic_cipher(raw_html):
     
     raw_bytes = step2.encode("utf-8")
     
-    # 🎲 প্রতিবার ডায়নামিক ক্রিপ্টোগ্রাফিক কী জেনারেশন
+    # 🎲 ডাইনামিক সল্ট ও কী জেনারেশন
     seed_a = random.randint(50, 230)
     seed_b = random.randint(17, 103)
     seed_c = random.randint(7, 43)
 
-    # 🌪️ Dynamic Multi-Round Chaos Transformation
     transformed = bytearray()
     curr_a = seed_a
     curr_b = seed_b
@@ -375,7 +374,6 @@ def generate_polymorphic_cipher(raw_html):
 
     b64_str = base64.b64encode(transformed).decode("ascii")
     
-    # ডায়নামিক অ্যালফাবেট এলোমেলো করা (Shuffled Dynamic Alphabet)
     shuffled_emojis = list(EMOJI_POOL)
     random.shuffle(shuffled_emojis)
     
@@ -402,7 +400,6 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
     token_str = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
     
     junk_str = "👿🔥🥵💀❌=%+=-&398" + ''.join(random.choices(string.ascii_letters + string.digits + "^£π÷👿🔥🥵💀❌", k=120))
-    
     fake_dump = f"👿🔥🥵💀❌ [কোড চোর সনাক্ত হয়েছে! তোর বাপ {BOT_USERNAME} দিয়ে ইনক্রিপ্ট করা কোড ডিকোড করার ক্ষমতা কারো নাই! ওনার: @{ADMIN_USERNAME}] 🔒⚡_{token_str}"
 
     payload_json = json.dumps(cipher_data["payload"])
@@ -422,7 +419,6 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
         f"╚══════════════════════════════════════════════════════════════╝"
     )
 
-    # 🛡️ ক্লায়েন্ট সাইড আনব্রেকেবল শিল্ড ও রিয়েল-টাইম অ্যান্টি-হুক এক্সিকিউশন
     return f"""<!--
 {banner_content}
 -->
@@ -462,7 +458,7 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
 
     const _fakeMsg = "{fake_dump}";
 
-    // 🛑 2. ANTI-DEBUGGER TIMING ATTACK TRAP
+    // 🛑 2. ANTI-DEBUGGER TIMING SHIELD
     let _t0 = Date.now();
     function _verifyIntegrity() {{
         let _t1 = Date.now();
@@ -473,7 +469,7 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
         _t0 = _t1;
     }}
 
-    // 🛑 3. ANTI-HOOKING SHIELD (Protects eval / document.write / atob)
+    // 🛑 3. ANTI-HOOKING & DYNAMIC DECODER
     try {{
         const _nativeWrite = document.write.bind(document);
         const _nativeOpen = document.open.bind(document);
@@ -488,9 +484,9 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
         _symMap.set("•", "=");
 
         const _pData = {payload_json};
-        const _sA = {_seed_a};
-        const _sB = {_seed_b};
-        const _sC = {_seed_c};
+        const _sA = {seed_a};
+        const _sB = {seed_b};
+        const _sC = {seed_c};
 
         _verifyIntegrity();
 
@@ -520,7 +516,7 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
 
         const _finalHtml = new TextDecoder("utf-8").decode(_outBuf);
 
-        // 🛑 4. MEMORY OVERWRITE & CONSOLE HIJACK
+        // 🛑 4. CONSOLE & MEMORY WIPER
         window.atob = function() {{ return _fakeMsg; }};
         console.log = function() {{ return _fakeMsg; }};
         console.dir = function() {{ return _fakeMsg; }};
@@ -533,7 +529,7 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
             Object.defineProperty(document.body, 'outerHTML', {{ get: function() {{ return _fakeMsg; }} }});
         }} catch(e) {{}}
 
-        // 🚀 5. INJECT NATIVE EXECUTABLE DOM
+        // 🚀 5. INJECT RUNTIME NATIVE DOM
         _nativeOpen();
         _nativeWrite(_finalHtml);
         _nativeClose();
@@ -557,11 +553,10 @@ def build_extreme_obfuscated_html(raw_html, fallback_title="Protected Document")
 
 
 # =========================================================
-# 🚀 ADVANCED MULTI-PLATFORM DIRECT API ENGINES (FIXED)
+# 🚀 ADVANCED MULTI-PLATFORM DIRECT API ENGINES
 # =========================================================
 
 def download_tiktok_direct(url):
-    """TikTok এর জন্য ডিরেক্ট হাই-স্পিড TikWM API বাইপাস"""
     try:
         api_url = "https://www.tikwm.com/api/"
         headers = {
@@ -603,12 +598,11 @@ def download_tiktok_direct(url):
                     "temp_path": file_path
                 }
     except Exception as e:
-        print(f"Direct TikTok Engine fallback error: {e}")
+        print(f"Direct TikTok Engine error: {e}")
     return None
 
 
 def download_via_cobalt(url):
-    """Cobalt Multi-Server API Engine (v10 API Updated)"""
     instances = [
         "https://api.cobalt.tools",
         "https://co.wuk.sh",
@@ -641,7 +635,6 @@ def download_via_cobalt(url):
 
 
 def download_facebook_direct(url):
-    """Facebook Videos & Reels (SnapSave Direct API Engine + Fallback)"""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -671,7 +664,6 @@ def download_facebook_direct(url):
     except Exception as e:
         print(f"Facebook Direct Engine Error: {e}")
 
-    # Fallback Option with Cobalt
     cobalt_url = download_via_cobalt(url)
     if cobalt_url:
         try:
@@ -694,7 +686,6 @@ def download_facebook_direct(url):
 
 
 def get_instagram_video_from_embed(url):
-    """ইনস্টাগ্রামের অফিশিয়াল এমবেড প্লেয়ার থেকে সোর্স কোড স্ক্র্যাপ করার ডাইরেক্ট মেথড"""
     match = re.search(r'instagram\.com/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)', url)
     if not match:
         return None
@@ -736,7 +727,6 @@ def get_instagram_video_from_embed(url):
 
 
 def download_instagram_direct(url):
-    """Instagram Reels & Posts (FastDl / Cobalt / Embed / yt-dlp Bypass)"""
     direct_vid_url = download_via_cobalt(url)
 
     if not direct_vid_url:
@@ -777,7 +767,6 @@ def download_instagram_direct(url):
         except Exception as e:
             print(f"Instagram file download error: {e}")
 
-    # Fallback Option with yt-dlp iOS Impersonate
     try:
         random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
         output_tmpl = f"downloads/insta_{random_id}_%(id)s.%(ext)s"
@@ -801,7 +790,6 @@ def download_instagram_direct(url):
 
 
 def download_youtube_direct(url):
-    """YouTube এর জন্য Android Client Bypass + Cobalt Multi-Engine"""
     cobalt_direct_url = download_via_cobalt(url)
     if cobalt_direct_url:
         try:
@@ -868,19 +856,16 @@ def process_unlimited_video(url):
     os.makedirs("downloads", exist_ok=True)
     url_lower = url.lower()
     
-    # TikTok
     if any(k in url_lower for k in ["tiktok.com", "douyin.com"]):
         tiktok_res = download_tiktok_direct(url)
         if tiktok_res:
             return tiktok_res
 
-    # Facebook
     if any(k in url_lower for k in ["facebook.com", "fb.watch", "fb.gg", "fb.com"]):
         fb_res = download_facebook_direct(url)
         if fb_res:
             return fb_res
 
-    # Instagram
     if any(k in url_lower for k in ["instagram.com", "instagr.am"]):
         insta_res = download_instagram_direct(url)
         if insta_res:
@@ -888,13 +873,11 @@ def process_unlimited_video(url):
         else:
             raise Exception("ইনস্টাগ্রাম ভিডিওটি একসেস করা সম্ভব হচ্ছে না। লিংকটি সঠিক ও পাবলিক কিনা তা নিশ্চিত করুন।")
 
-    # YouTube
     if any(k in url_lower for k in ["youtube.com", "youtu.be"]):
         yt_res = download_youtube_direct(url)
         if yt_res:
             return yt_res
 
-    # Universal Cobalt Multi-API
     cobalt_direct_url = download_via_cobalt(url)
     if cobalt_direct_url:
         try:
@@ -914,7 +897,6 @@ def process_unlimited_video(url):
         except Exception:
             pass
 
-    # জেনারেল yt-dlp ফেলব্যাক
     random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
     output_tmpl = f"downloads/{random_id}_%(id)s.%(ext)s"
 
